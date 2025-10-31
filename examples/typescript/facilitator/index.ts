@@ -102,6 +102,12 @@ app.get("/supported", async (req: Request, res: Response) => {
 
   // evm
   if (EVM_PRIVATE_KEY) {
+    // Support both sepolia and base-sepolia
+    kinds.push({
+      x402Version: 1,
+      scheme: "exact",
+      network: "sepolia",
+    });
     kinds.push({
       x402Version: 1,
       scheme: "exact",

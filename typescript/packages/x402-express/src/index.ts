@@ -8,6 +8,8 @@ import {
   findMatchingRoute,
   processPriceToAtomicAmount,
   toJsonSafe,
+  getNetworkId,
+  getUsdcChainConfigForChain,
 } from "x402/shared";
 import { getPaywallHtml } from "x402/paywall";
 import {
@@ -121,14 +123,31 @@ export function paymentMiddleware(
     // TODO: create a shared middleware function to build payment requirements
     // evm networks
     if (SupportedEVMNetworks.includes(network)) {
+      const chainId = getNetworkId(network);
+      const chainConfig = getUsdcChainConfigForChain(chainId);
+
+      // Calculate facilitator fee: 0.3% or minimum 0.01 tokens (10000 atomic units for 6 decimals)
+      // Fee is deducted FROM the total amount, not added on top
+      const totalAmount = BigInt(maxAmountRequired);
+      const minFee = BigInt(10000); // 0.01 USDC (6 decimals)
+      const percentFee = (totalAmount * BigInt(3)) / BigInt(1000); // 0.3%
+      const feeAmount = percentFee > minFee ? percentFee : minFee;
+      const merchantAmount = totalAmount - feeAmount;
+
+      // Determine who receives the payment
+      // If FeeReceiver contract is deployed, use it; otherwise direct to merchant (backward compatibility)
+      const actualPayTo = chainConfig?.feeReceiverAddress
+        ? getAddress(chainConfig.feeReceiverAddress)
+        : getAddress(payTo);
+
       paymentRequirements.push({
         scheme: "exact",
         network,
-        maxAmountRequired,
+        maxAmountRequired: totalAmount.toString(),
         resource: resourceUrl,
         description: description ?? "",
         mimeType: mimeType ?? "",
-        payTo: getAddress(payTo),
+        payTo: actualPayTo,
         maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
         asset: getAddress(asset.address),
         // TODO: Rename outputSchema to requestStructure
@@ -141,7 +160,14 @@ export function paymentMiddleware(
           },
           output: outputSchema,
         },
-        extra: (asset as ERC20TokenAmount["asset"]).eip712,
+        extra: {
+          ...(asset as ERC20TokenAmount["asset"]).eip712,
+          // Store merchant info and fee for settlement
+          merchant: getAddress(payTo),
+          merchantAmount: merchantAmount.toString(),
+          feeAmount: feeAmount.toString(),
+          useFeeReceiver: !!chainConfig?.feeReceiverAddress,
+        },
       });
     }
 

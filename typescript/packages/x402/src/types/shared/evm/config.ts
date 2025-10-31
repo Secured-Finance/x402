@@ -13,6 +13,7 @@ export const config: Record<string, ChainConfig> = {
   "11155111": {
     usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     usdcName: "USDC",
+    feeReceiverAddress: "0x0d06F661a4fCB8CF357dCc40b0938eD1f6aC7172",
   },
   "1": {
     usdcAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
@@ -77,4 +78,5 @@ export const config: Record<string, ChainConfig> = {
 export type ChainConfig = {
   usdcAddress: Address | SolanaAddress;
   usdcName: string;
+  feeReceiverAddress?: Address;
 };

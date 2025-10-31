@@ -34,6 +34,10 @@ export async function signAuthorization<transport extends Transport, chain exten
   const name = extra?.name;
   const version = extra?.version;
 
+  // Use ReceiveWithAuthorization for FeeReceiver contract, TransferWithAuthorization otherwise
+  const useFeeReceiver = extra?.useFeeReceiver === true;
+  const primaryType = useFeeReceiver ? "ReceiveWithAuthorization" : "TransferWithAuthorization";
+
   const data = {
     types: authorizationTypes,
     domain: {
@@ -42,7 +46,7 @@ export async function signAuthorization<transport extends Transport, chain exten
       chainId,
       verifyingContract: getAddress(asset),
     },
-    primaryType: "TransferWithAuthorization" as const,
+    primaryType: primaryType as "TransferWithAuthorization" | "ReceiveWithAuthorization",
     message: {
       from: getAddress(from),
       to: getAddress(to),
