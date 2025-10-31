@@ -8,7 +8,7 @@ import {
 } from "@coinbase/onchainkit/wallet";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPublicClient, formatUnits, http, publicActions } from "viem";
-import { base, baseSepolia } from "viem/chains";
+import { base, baseSepolia, mainnet, sepolia } from "viem/chains";
 import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
 
 import type { PaymentRequirements } from "../../types/verify";
@@ -53,7 +53,23 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       : Number(paymentRequirement.maxAmountRequired ?? 0) / 1_000_000;
 
   const network = paymentRequirement.network as Network;
-  const paymentChain = network === "base-sepolia" ? baseSepolia : base;
+  // Map network identifier to correct chain
+  let paymentChain;
+  switch (network) {
+    case "sepolia":
+      paymentChain = sepolia;
+      break;
+    case "base-sepolia":
+      paymentChain = baseSepolia;
+      break;
+    case "base":
+      paymentChain = base;
+      break;
+    case "mainnet":
+    default:
+      paymentChain = mainnet;
+      break;
+  }
   const chainId = paymentChain.id;
   const chainName = getNetworkDisplayName(network);
   const testnet = isTestnetNetwork(network);

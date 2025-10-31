@@ -39,12 +39,12 @@ import { POST } from "./api/session-token";
  *
  * @example
  * ```typescript
- * // Simple configuration - All endpoints are protected by $0.01 of USDC on base-sepolia
+ * // Simple configuration - All endpoints are protected by $0.01 of USDC on sepolia
  * export const middleware = paymentMiddleware(
  *   '0x123...', // payTo address
  *   {
  *     price: '$0.01', // USDC amount in dollars
- *     network: 'base-sepolia'
+ *     network: 'sepolia'
  *   },
  *   // Optional facilitator configuration. Defaults to x402.org/facilitator for testnet usage
  * );
@@ -239,7 +239,7 @@ export function paymentMiddleware(
                 typeof getPaywallHtml
               >[0]["paymentRequirements"],
               currentUrl: request.url,
-              testnet: network === "base-sepolia",
+              testnet: network === "sepolia",
               cdpClientKey: paywall?.cdpClientKey,
               appLogo: paywall?.appLogo,
               appName: paywall?.appName,
