@@ -23,21 +23,53 @@ config();
 const EVM_PRIVATE_KEY = process.env.EVM_PRIVATE_KEY || "";
 const SVM_PRIVATE_KEY = process.env.SVM_PRIVATE_KEY || "";
 const SVM_RPC_URL = process.env.SVM_RPC_URL || "";
+const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || "development";
 
 if (!EVM_PRIVATE_KEY && !SVM_PRIVATE_KEY) {
-  console.error("Missing required environment variables");
+  console.error("❌ Missing required environment variables: EVM_PRIVATE_KEY or SVM_PRIVATE_KEY");
+  console.error("   At least one private key must be provided to support payments");
   process.exit(1);
 }
 
-// Create X402 config with custom RPC URL if provided
 const x402Config: X402Config | undefined = SVM_RPC_URL
   ? { svmConfig: { rpcUrl: SVM_RPC_URL } }
   : undefined;
 
 const app = express();
 
-// Configure express to parse JSON bodies
 app.use(express.json());
+
+if (NODE_ENV === "development") {
+  app.use((req, _res, next) => {
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    next();
+  });
+}
+
+app.get("/health", (_req: Request, res: Response) => {
+  res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    networks: {
+      evm: !!EVM_PRIVATE_KEY,
+      svm: !!SVM_PRIVATE_KEY,
+    },
+  });
+});
+
+app.get("/", (_req: Request, res: Response) => {
+  res.json({
+    name: "x402-facilitator",
+    version: "1.0.0",
+    endpoints: {
+      health: "GET /health",
+      verify: "POST /verify",
+      settle: "POST /settle",
+      supported: "GET /supported",
+    },
+  });
+});
 
 type VerifyRequest = {
   paymentPayload: PaymentPayload;
@@ -49,14 +81,11 @@ type SettleRequest = {
   paymentRequirements: PaymentRequirements;
 };
 
-app.get("/verify", (req: Request, res: Response) => {
+app.get("/verify", (_req: Request, res: Response) => {
   res.json({
     endpoint: "/verify",
-    description: "POST to verify x402 payments",
-    body: {
-      paymentPayload: "PaymentPayload",
-      paymentRequirements: "PaymentRequirements",
-    },
+    method: "POST",
+    description: "Verify payment authorization without executing on-chain",
   });
 });
 
@@ -66,72 +95,73 @@ app.post("/verify", async (req: Request, res: Response) => {
     const paymentRequirements = PaymentRequirementsSchema.parse(body.paymentRequirements);
     const paymentPayload = PaymentPayloadSchema.parse(body.paymentPayload);
 
-    // use the correct client/signer based on the requested network
-    // svm verify requires a Signer because it signs & simulates the txn
     let client: Signer | ConnectedClient;
     if (SupportedEVMNetworks.includes(paymentRequirements.network)) {
+      if (!EVM_PRIVATE_KEY) {
+        return res.status(503).json({ error: "EVM payments not supported" });
+      }
       client = createConnectedClient(paymentRequirements.network);
     } else if (SupportedSVMNetworks.includes(paymentRequirements.network)) {
+      if (!SVM_PRIVATE_KEY) {
+        return res.status(503).json({ error: "SVM payments not supported" });
+      }
       client = await createSigner(paymentRequirements.network, SVM_PRIVATE_KEY);
     } else {
-      throw new Error("Invalid network");
+      return res.status(400).json({ error: `Unsupported network: ${paymentRequirements.network}` });
     }
 
-    // verify
-    const valid = await verify(client, paymentPayload, paymentRequirements, x402Config);
-    res.json(valid);
+    const result = await verify(client, paymentPayload, paymentRequirements, x402Config);
+    res.json(result);
   } catch (error) {
-    console.error("error", error);
-    res.status(400).json({ error: "Invalid request" });
+    console.error("[VERIFY ERROR]", error);
+    const errorMessage = error instanceof Error ? error.message : "Invalid request";
+    res.status(400).json({ error: errorMessage });
   }
 });
 
-app.get("/settle", (req: Request, res: Response) => {
+app.get("/settle", (_req: Request, res: Response) => {
   res.json({
     endpoint: "/settle",
-    description: "POST to settle x402 payments",
-    body: {
-      paymentPayload: "PaymentPayload",
-      paymentRequirements: "PaymentRequirements",
-    },
+    method: "POST",
+    description: "Execute on-chain settlement of verified payment",
   });
 });
 
-app.get("/supported", async (req: Request, res: Response) => {
-  let kinds: SupportedPaymentKind[] = [];
+app.get("/supported", async (_req: Request, res: Response) => {
+  const kinds: SupportedPaymentKind[] = [];
 
-  // evm
   if (EVM_PRIVATE_KEY) {
-    // Support both sepolia and base-sepolia
-    kinds.push({
-      x402Version: 1,
-      scheme: "exact",
-      network: "sepolia",
-    });
-    kinds.push({
-      x402Version: 1,
-      scheme: "exact",
-      network: "base-sepolia",
-    });
+    kinds.push(
+      { x402Version: 1, scheme: "exact", network: "sepolia" },
+      { x402Version: 1, scheme: "exact", network: "base-sepolia" },
+      { x402Version: 1, scheme: "exact", network: "base" },
+      { x402Version: 1, scheme: "exact", network: "mainnet" },
+      { x402Version: 1, scheme: "exact", network: "polygon" },
+      { x402Version: 1, scheme: "exact", network: "avalanche" }
+    );
   }
 
-  // svm
   if (SVM_PRIVATE_KEY) {
     const signer = await createSigner("solana-devnet", SVM_PRIVATE_KEY);
     const feePayer = isSvmSignerWallet(signer) ? signer.address : undefined;
 
-    kinds.push({
-      x402Version: 1,
-      scheme: "exact",
-      network: "solana-devnet",
-      extra: {
-        feePayer,
+    kinds.push(
+      {
+        x402Version: 1,
+        scheme: "exact",
+        network: "solana-devnet",
+        extra: { feePayer },
       },
-    });
+      {
+        x402Version: 1,
+        scheme: "exact",
+        network: "solana",
+        extra: { feePayer },
+      }
+    );
   }
-  res.json({
-    kinds,
-  });
+
+  res.json({ kinds });
 });
 
 app.post("/settle", async (req: Request, res: Response) => {
@@ -140,25 +170,41 @@ app.post("/settle", async (req: Request, res: Response) => {
     const paymentRequirements = PaymentRequirementsSchema.parse(body.paymentRequirements);
     const paymentPayload = PaymentPayloadSchema.parse(body.paymentPayload);
 
-    // use the correct private key based on the requested network
     let signer: Signer;
     if (SupportedEVMNetworks.includes(paymentRequirements.network)) {
+      if (!EVM_PRIVATE_KEY) {
+        return res.status(503).json({ error: "EVM payments not supported" });
+      }
       signer = await createSigner(paymentRequirements.network, EVM_PRIVATE_KEY);
     } else if (SupportedSVMNetworks.includes(paymentRequirements.network)) {
+      if (!SVM_PRIVATE_KEY) {
+        return res.status(503).json({ error: "SVM payments not supported" });
+      }
       signer = await createSigner(paymentRequirements.network, SVM_PRIVATE_KEY);
     } else {
-      throw new Error("Invalid network");
+      return res.status(400).json({ error: `Unsupported network: ${paymentRequirements.network}` });
     }
 
-    // settle
     const response = await settle(signer, paymentPayload, paymentRequirements, x402Config);
     res.json(response);
   } catch (error) {
-    console.error("error", error);
-    res.status(400).json({ error: `Invalid request: ${error}` });
+    console.error("[SETTLE ERROR]", error);
+    const errorMessage = error instanceof Error ? error.message : "Settlement failed";
+    res.status(400).json({ error: errorMessage });
   }
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log(`Server listening at http://localhost:${process.env.PORT || 3000}`);
+app.listen(PORT, () => {
+  console.log(`✅ x402 Facilitator running at http://localhost:${PORT}`);
+  console.log(`   Environment: ${NODE_ENV}`);
+  console.log(`   EVM Support: ${EVM_PRIVATE_KEY ? "✓" : "✗"}`);
+  console.log(`   SVM Support: ${SVM_PRIVATE_KEY ? "✓" : "✗"}`);
+  if (SVM_RPC_URL) {
+    console.log(`   SVM RPC: ${SVM_RPC_URL}`);
+  }
+  console.log(`\n   Endpoints:`);
+  console.log(`   - GET  /health     Health check`);
+  console.log(`   - GET  /supported  List supported networks`);
+  console.log(`   - POST /verify     Verify payment`);
+  console.log(`   - POST /settle     Settle payment`);
 });

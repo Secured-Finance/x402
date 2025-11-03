@@ -26,6 +26,7 @@ import {
   SupportedSVMNetworks,
 } from "x402/types";
 import { useFacilitator } from "x402/verify";
+import { calculateFee, DEFAULT_PAYMENT_TIMEOUT_SECONDS, X402_VERSION } from "x402/constants";
 
 /**
  * Creates a payment middleware factory for Express
@@ -81,7 +82,6 @@ export function paymentMiddleware(
   paywall?: PaywallConfig,
 ) {
   const { verify, settle, supported } = useFacilitator(facilitator);
-  const x402Version = 1;
 
   // Pre-compile route patterns to regex and extract verbs
   const routePatterns = computeRoutePatterns(routes);
@@ -126,13 +126,11 @@ export function paymentMiddleware(
       const chainId = getNetworkId(network);
       const chainConfig = getUsdcChainConfigForChain(chainId);
 
-      // Calculate facilitator fee: 0.3% or minimum 0.01 tokens (10000 atomic units for 6 decimals)
+      // Calculate facilitator fee using shared constants
       // Fee is deducted FROM the total amount, not added on top
+      // IMPORTANT: This must stay in sync with FeeReceiver.sol (see constants.ts)
       const totalAmount = BigInt(maxAmountRequired);
-      const minFee = BigInt(10000); // 0.01 USDC (6 decimals)
-      const percentFee = (totalAmount * BigInt(3)) / BigInt(1000); // 0.3%
-      const feeAmount = percentFee > minFee ? percentFee : minFee;
-      const merchantAmount = totalAmount - feeAmount;
+      const { feeAmount, merchantAmount } = calculateFee(totalAmount);
 
       // Determine who receives the payment
       // If FeeReceiver contract is deployed, use it; otherwise direct to merchant (backward compatibility)
@@ -148,7 +146,7 @@ export function paymentMiddleware(
         description: description ?? "",
         mimeType: mimeType ?? "",
         payTo: actualPayTo,
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
+        maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
         asset: getAddress(asset.address),
         // TODO: Rename outputSchema to requestStructure
         outputSchema: {
@@ -198,7 +196,7 @@ export function paymentMiddleware(
         description: description ?? "",
         mimeType: mimeType ?? "",
         payTo: payTo,
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
+        maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
         asset: asset.address,
         // TODO: Rename outputSchema to requestStructure
         outputSchema: {
@@ -256,7 +254,7 @@ export function paymentMiddleware(
         return;
       }
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: "X-PAYMENT header is required",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -266,11 +264,11 @@ export function paymentMiddleware(
     let decodedPayment: PaymentPayload;
     try {
       decodedPayment = exact.evm.decodePayment(payment);
-      decodedPayment.x402Version = x402Version;
+      decodedPayment.x402Version = X402_VERSION;
     } catch (error) {
       console.error(error);
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: error || "Invalid or malformed payment header",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -283,7 +281,7 @@ export function paymentMiddleware(
     );
     if (!selectedPaymentRequirements) {
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: "Unable to find matching payment requirements",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -294,7 +292,7 @@ export function paymentMiddleware(
       const response = await verify(decodedPayment, selectedPaymentRequirements);
       if (!response.isValid) {
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error: response.invalidReason,
           accepts: toJsonSafe(paymentRequirements),
           payer: response.payer,
@@ -304,7 +302,7 @@ export function paymentMiddleware(
     } catch (error) {
       console.error(error);
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error,
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -346,7 +344,7 @@ export function paymentMiddleware(
       // if the settle fails, return an error
       if (!settleResponse.success) {
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error: settleResponse.errorReason,
           accepts: toJsonSafe(paymentRequirements),
         });
@@ -357,7 +355,7 @@ export function paymentMiddleware(
       // If settlement fails and the response hasn't been sent yet, return an error
       if (!res.headersSent) {
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error,
           accepts: toJsonSafe(paymentRequirements),
         });
