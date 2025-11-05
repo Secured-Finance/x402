@@ -121,20 +121,84 @@ export function findMatchingRoute(
  * @param network - The network to get the default asset for
  * @returns The default asset
  */
-export function getDefaultAsset(network: Network) {
+/**
+ * Get all available assets for a network, optionally filtered by token symbol
+ * @param network - The network to get assets for
+ * @param tokenFilter - Optional token symbol to filter by ("USDC", "JPYC", "USDFC")
+ * @returns Array of available assets matching the filter
+ */
+export function getAllAssetsForNetwork(network: Network, tokenFilter?: "USDC" | "JPYC" | "USDFC") {
   const chainId = getNetworkId(network);
-  const usdc = getUsdcChainConfigForChain(chainId);
-  if (!usdc) {
-    throw new Error(`Unable to get default asset on ${network}`);
+  const chainConfig = getUsdcChainConfigForChain(chainId);
+  if (!chainConfig) {
+    throw new Error(`Unable to get assets for ${network}`);
   }
-  return {
-    address: usdc.usdcAddress,
-    decimals: 6,
-    eip712: {
-      name: usdc.usdcName,
-      version: "2",
-    },
-  };
+
+  const assets: Array<{ symbol: string; address: Address | string; decimals: number; eip712: { name: string; version: string } }> = [];
+
+  // Add USDC if available
+  if (chainConfig.usdcAddress && chainConfig.usdcName) {
+    assets.push({
+      symbol: "USDC",
+      address: chainConfig.usdcAddress,
+      decimals: 6,
+      eip712: {
+        name: chainConfig.usdcName,
+        version: "2",
+      },
+    });
+  }
+
+  // Add JPYC if available
+  if (chainConfig.jpycAddress && chainConfig.jpycName) {
+    assets.push({
+      symbol: "JPYC",
+      address: chainConfig.jpycAddress,
+      decimals: 6,
+      eip712: {
+        name: chainConfig.jpycName,
+        version: "2",
+      },
+    });
+  }
+
+  // Add USDFC if available
+  if (chainConfig.usdfcAddress && chainConfig.usdfcName) {
+    assets.push({
+      symbol: "USDFC",
+      address: chainConfig.usdfcAddress,
+      decimals: 18,
+      eip712: {
+        name: chainConfig.usdfcName,
+        version: "1",
+      },
+    });
+  }
+
+  if (assets.length === 0) {
+    throw new Error(`No supported tokens found for ${network}`);
+  }
+
+  // Filter by token if specified
+  if (tokenFilter) {
+    const filtered = assets.filter(asset => asset.symbol === tokenFilter);
+    if (filtered.length === 0) {
+      throw new Error(`Token ${tokenFilter} is not available on ${network}. Available tokens: ${assets.map(a => a.symbol).join(", ")}`);
+    }
+    return filtered;
+  }
+
+  return assets;
+}
+
+/**
+ * Get default (first) asset for a network
+ * @param network - The network to get the default asset for
+ * @returns The default asset
+ */
+export function getDefaultAsset(network: Network) {
+  const assets = getAllAssetsForNetwork(network);
+  return assets[0]; // Return first available asset
 }
 
 /**

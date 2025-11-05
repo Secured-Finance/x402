@@ -2,7 +2,7 @@ import { OnchainKitProvider } from "@coinbase/onchainkit";
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider, createConfig, http } from "wagmi";
-import { base, baseSepolia, mainnet, sepolia } from "viem/chains";
+import { base, baseSepolia, mainnet, sepolia, filecoin, filecoinCalibration } from "viem/chains";
 
 import { choosePaymentRequirement, isEvmNetwork } from "./paywallUtils";
 import "./window.d.ts";
@@ -11,12 +11,14 @@ const queryClient = new QueryClient();
 
 // Create wagmi config with all supported chains
 const wagmiConfig = createConfig({
-  chains: [mainnet, sepolia, base, baseSepolia],
+  chains: [mainnet, sepolia, base, baseSepolia, filecoin, filecoinCalibration],
   transports: {
     [mainnet.id]: http(),
     [sepolia.id]: http(),
     [base.id]: http(),
     [baseSepolia.id]: http(),
+    [filecoin.id]: http(),
+    [filecoinCalibration.id]: http(),
   },
 });
 
@@ -50,6 +52,12 @@ export function Providers({ children }: ProvidersProps) {
       break;
     case "base":
       chain = base;
+      break;
+    case "filecoin":
+      chain = filecoin;
+      break;
+    case "filecoin-calibration":
+      chain = filecoinCalibration;
       break;
     case "mainnet":
     default:

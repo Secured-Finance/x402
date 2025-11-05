@@ -1,3 +1,3 @@
 export * from "./usdc";
 export * from "./erc20";
-export { config } from "../../types/shared/evm/config";
+export { config, getExplorerUrl } from "../../types/shared/evm/config";

@@ -8,12 +8,12 @@ import {
 } from "@coinbase/onchainkit/wallet";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPublicClient, formatUnits, http, publicActions } from "viem";
-import { base, baseSepolia, mainnet, sepolia } from "viem/chains";
+import { base, baseSepolia, mainnet, sepolia, filecoin, filecoinCalibration } from "viem/chains";
 import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
 
 import type { PaymentRequirements } from "../../types/verify";
 import { exact } from "../../schemes";
-import { getUSDCBalance } from "../../shared/evm";
+import { getStablecoinBalance, getStablecoinSymbol } from "../../shared/evm";
 import type { Network } from "../../types/shared";
 
 import { Spinner } from "./Spinner";
@@ -43,14 +43,17 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
   const [status, setStatus] = useState<string>("");
   const [isCorrectChain, setIsCorrectChain] = useState<boolean | null>(null);
   const [isPaying, setIsPaying] = useState(false);
-  const [formattedUsdcBalance, setFormattedUsdcBalance] = useState<string>("");
+  const [formattedStableBalance, setFormattedStableBalance] = useState<string>("");
+  const [stableSymbol, setStableSymbol] = useState<string>("USDC");
   const [hideBalance, setHideBalance] = useState(true);
 
   const x402 = window.x402;
+  // Get decimals from payment requirements, default to 6 for backwards compatibility
+  const decimals = (paymentRequirement.extra?.decimals as number) ?? 6;
   const amount =
     typeof x402.amount === "number"
       ? x402.amount
-      : Number(paymentRequirement.maxAmountRequired ?? 0) / 1_000_000;
+      : Number(paymentRequirement.maxAmountRequired ?? 0) / 10 ** decimals;
 
   const network = paymentRequirement.network as Network;
   // Map network identifier to correct chain
@@ -64,6 +67,12 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       break;
     case "base":
       paymentChain = base;
+      break;
+    case "filecoin-calibration":
+      paymentChain = filecoinCalibration;
+      break;
+    case "filecoin":
+      paymentChain = filecoin;
       break;
     case "mainnet":
     default:
@@ -84,14 +93,20 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     [paymentChain],
   );
 
-  const checkUSDCBalance = useCallback(async () => {
+  const checkStableBalance = useCallback(async () => {
     if (!address) {
       return;
     }
-    const balance = await getUSDCBalance(publicClient, address);
-    const formattedBalance = formatUnits(balance, 6);
-    setFormattedUsdcBalance(formattedBalance);
-  }, [address, publicClient]);
+    const balance = await getStablecoinBalance(publicClient, address);
+    const formattedBalance = formatUnits(balance, decimals);
+    // Format to 2-4 decimal places for cleaner display
+    const num = parseFloat(formattedBalance);
+    const formatted = num.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 4,
+    });
+    setFormattedStableBalance(formatted);
+  }, [address, publicClient, decimals]);
 
   const handleSwitchChain = useCallback(async () => {
     if (isCorrectChain) {
@@ -113,8 +128,11 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     }
 
     void handleSwitchChain();
-    void checkUSDCBalance();
-  }, [address, handleSwitchChain, checkUSDCBalance]);
+    // Resolve symbol dynamically (USDC/USDFC)
+    const symbol = getStablecoinSymbol(publicClient) || "USDC";
+    setStableSymbol(symbol);
+    void checkStableBalance();
+  }, [address, handleSwitchChain, checkStableBalance, publicClient]);
 
   useEffect(() => {
     if (isConnected && chainId === connectedChainId) {
@@ -156,11 +174,11 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     setIsPaying(true);
 
     try {
-      setStatus("Checking USDC balance...");
-      const balance = await getUSDCBalance(publicClient, address);
+      setStatus(`Checking ${stableSymbol} balance...`);
+      const balance = await getStablecoinBalance(publicClient, address);
 
       if (balance === 0n) {
-        throw new Error(`Insufficient balance. Make sure you have USDC on ${chainName}`);
+        throw new Error(`Insufficient balance. Make sure you have ${stableSymbol} on ${chainName}`);
       }
 
       setStatus("Creating payment signature...");
@@ -226,6 +244,7 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     publicClient,
     chainName,
     onSuccessfulResponse,
+    stableSymbol,
   ]);
 
   if (!x402) {
@@ -238,11 +257,11 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         <h1 className="title">Payment Required</h1>
         <p>
           {paymentRequirement.description && `${paymentRequirement.description}.`} To access this
-          content, please pay ${amount} {chainName} USDC.
+          content, please pay ${amount} {chainName} {stableSymbol}.
         </p>
         {testnet && (
           <p className="instructions">
-            Need {chainName} USDC?{" "}
+            Need {chainName} {stableSymbol}?{" "}
             <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer">
               Get some <u>here</u>.
             </a>
@@ -273,15 +292,15 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
                 <span className="payment-label">Available balance:</span>
                 <span className="payment-value">
                   <button className="balance-button" onClick={() => setHideBalance(prev => !prev)}>
-                    {formattedUsdcBalance && !hideBalance
-                      ? `$${formattedUsdcBalance} USDC`
-                      : "••••• USDC"}
+                    {formattedStableBalance && !hideBalance
+                      ? `${formattedStableBalance} ${stableSymbol}`
+                      : `••••• ${stableSymbol}`}
                   </button>
                 </span>
               </div>
               <div className="payment-row">
                 <span className="payment-label">Amount:</span>
-                <span className="payment-value">${amount} USDC</span>
+                <span className="payment-value">${amount} {stableSymbol}</span>
               </div>
               <div className="payment-row">
                 <span className="payment-label">Network:</span>

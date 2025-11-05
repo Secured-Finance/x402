@@ -18,6 +18,8 @@ export const NetworkSchema = z.enum([
   "peaq",
   "story",
   "mainnet",
+  "filecoin",
+  "filecoin-calibration",
 ]);
 export type Network = z.infer<typeof NetworkSchema>;
 
@@ -38,6 +40,8 @@ export const SupportedEVMNetworks: Network[] = [
   "peaq",
   "story",
   "mainnet",
+  "filecoin",
+  "filecoin-calibration",
 ];
 export const EvmNetworkToChainId = new Map<Network, number>([
   ["abstract", 2741],
@@ -55,6 +59,8 @@ export const EvmNetworkToChainId = new Map<Network, number>([
   ["peaq", 3338],
   ["story", 1514],
   ["mainnet", 1],
+  ["filecoin", 314],
+  ["filecoin-calibration", 314159],
 ]);
 
 // svm
@@ -70,3 +76,19 @@ export const ChainIdToNetwork = Object.fromEntries(
     network,
   ]),
 ) as Record<number, Network>;
+
+// Runtime helper to determine testnet vs mainnet for both EVM and SVM networks
+const TESTNET_NETWORKS = new Set<Network>([
+  "abstract-testnet",
+  "sepolia",
+  "base-sepolia",
+  "avalanche-fuji",
+  "solana-devnet",
+  "sei-testnet",
+  "polygon-amoy",
+  "filecoin-calibration",
+]);
+
+export function isTestnetNetwork(network: Network): boolean {
+  return TESTNET_NETWORKS.has(network);
+}

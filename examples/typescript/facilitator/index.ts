@@ -1,4 +1,28 @@
 /* eslint-env node */
+/**
+ * x402 Facilitator Service
+ *
+ * A standalone service that verifies and settles x402 payments across multiple networks.
+ * Developers integrate with this service using the x402-express middleware (or other clients).
+ *
+ * Production Deployment Requirements:
+ * - Set NODE_ENV=production
+ * - Provide EVM_PRIVATE_KEY for EVM chains (Ethereum, Base, Polygon, Avalanche, Filecoin)
+ * - Optionally provide SVM_PRIVATE_KEY for Solana networks
+ * - Ensure wallet has sufficient gas tokens on all supported networks
+ * - Use dedicated RPC endpoints (not public RPCs) for reliability
+ * - Set up HTTPS/TLS termination (use a reverse proxy like nginx)
+ * - Configure CORS appropriately for your application domains
+ *
+ * Supported Testnets:
+ * - Sepolia: USDC, JPYC (with FeeReceiver contract deployed)
+ * - Filecoin Calibration: USDFC (with FeeReceiver contract deployed)
+ *
+ * For Mainnet deployment:
+ * - Deploy FeeReceiver contracts to production networks first
+ * - Update config.ts with FeeReceiver addresses
+ * - Verify JPYC token addresses are correct
+ */
 import { config } from "dotenv";
 import express, { Request, Response } from "express";
 import { verify, settle } from "x402/facilitator";
@@ -27,8 +51,8 @@ const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 
 if (!EVM_PRIVATE_KEY && !SVM_PRIVATE_KEY) {
-  console.error("❌ Missing required environment variables: EVM_PRIVATE_KEY or SVM_PRIVATE_KEY");
-  console.error("   At least one private key must be provided to support payments");
+  console.error("Error: Missing required environment variables");
+  console.error("At least one of EVM_PRIVATE_KEY or SVM_PRIVATE_KEY must be provided");
   process.exit(1);
 }
 
@@ -137,7 +161,9 @@ app.get("/supported", async (_req: Request, res: Response) => {
       { x402Version: 1, scheme: "exact", network: "base" },
       { x402Version: 1, scheme: "exact", network: "mainnet" },
       { x402Version: 1, scheme: "exact", network: "polygon" },
-      { x402Version: 1, scheme: "exact", network: "avalanche" }
+      { x402Version: 1, scheme: "exact", network: "avalanche" },
+      { x402Version: 1, scheme: "exact", network: "filecoin" },
+      { x402Version: 1, scheme: "exact", network: "filecoin-calibration" }
     );
   }
 
@@ -195,16 +221,9 @@ app.post("/settle", async (req: Request, res: Response) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ x402 Facilitator running at http://localhost:${PORT}`);
+  console.log(`✅ x402 Facilitator Service`);
+  console.log(`   URL: http://localhost:${PORT}`);
   console.log(`   Environment: ${NODE_ENV}`);
-  console.log(`   EVM Support: ${EVM_PRIVATE_KEY ? "✓" : "✗"}`);
-  console.log(`   SVM Support: ${SVM_PRIVATE_KEY ? "✓" : "✗"}`);
-  if (SVM_RPC_URL) {
-    console.log(`   SVM RPC: ${SVM_RPC_URL}`);
-  }
-  console.log(`\n   Endpoints:`);
-  console.log(`   - GET  /health     Health check`);
-  console.log(`   - GET  /supported  List supported networks`);
-  console.log(`   - POST /verify     Verify payment`);
-  console.log(`   - POST /settle     Settle payment`);
+  console.log(`   Networks: ${EVM_PRIVATE_KEY ? "EVM" : ""}${EVM_PRIVATE_KEY && SVM_PRIVATE_KEY ? " + " : ""}${SVM_PRIVATE_KEY ? "Solana" : ""}`);
+  console.log(`\n   Ready to process payments on testnet and mainnet`);
 });

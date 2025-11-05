@@ -10,6 +10,8 @@ import {
   toJsonSafe,
 } from "x402/shared";
 import { getPaywallHtml } from "x402/paywall";
+import { isTestnetNetwork } from "x402/types";
+import type { Network } from "x402/types";
 import {
   ERC20TokenAmount,
   FacilitatorConfig,
@@ -217,7 +219,7 @@ export function paymentMiddleware(
               typeof getPaywallHtml
             >[0]["paymentRequirements"],
             currentUrl,
-            testnet: network === "sepolia",
+            testnet: isTestnetNetwork(network as Network),
             cdpClientKey: paywall?.cdpClientKey,
             appName: paywall?.appName,
             appLogo: paywall?.appLogo,

@@ -22,7 +22,6 @@ export async function POST(req: Request, res: Response) {
     const apiKeySecret = process.env.CDP_API_KEY_SECRET;
 
     if (!apiKeyId || !apiKeySecret) {
-      console.error("Missing CDP API credentials");
       return res.status(500).json({
         error: "Server configuration error: Missing CDP API credentials",
       });
@@ -70,8 +69,6 @@ export async function POST(req: Request, res: Response) {
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Failed to generate session token:", response.status, errorText);
       return res.status(response.status).json({
         error: "Failed to generate session token",
       });
@@ -81,7 +78,9 @@ export async function POST(req: Request, res: Response) {
 
     return res.json(data);
   } catch (error) {
-    console.error("Error generating session token:", error);
-    return res.status(500).json({ error: "Internal server error" });
+    return res.status(500).json({
+      error: "Internal server error",
+      message: error instanceof Error ? error.message : "Unknown error"
+    });
   }
 }

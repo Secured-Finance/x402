@@ -1,4 +1,13 @@
-import { Account, Address, Chain, getAddress, Hex, parseErc6492Signature, Transport } from "viem";
+import {
+  Account,
+  Address,
+  Chain,
+  getAddress,
+  Hex,
+  parseErc6492Signature,
+  Transport,
+  verifyTypedData,
+} from "viem";
 import { getNetworkId } from "../../../shared";
 import { getVersion, getERC20Balance } from "../../../shared/evm";
 import {
@@ -76,7 +85,8 @@ export async function verify<
     name = paymentRequirements.extra?.name ?? config[chainId.toString()].usdcName;
     erc20Address = paymentRequirements.asset as Address;
     version = paymentRequirements.extra?.version ?? (await getVersion(client));
-  } catch {
+  } catch (e) {
+    console.error("ERROR in verification setup:", e);
     return {
       isValid: false,
       invalidReason: `invalid_network`,
@@ -106,15 +116,28 @@ export async function verify<
       nonce: exactEvmPayload.authorization.nonce,
     },
   };
-  const recoveredAddress = await client.verifyTypedData({
-    address: exactEvmPayload.authorization.from as Address,
-    ...permitTypedData,
-    signature: exactEvmPayload.signature as Hex,
-  });
-  if (!recoveredAddress) {
+
+  let isValidSignature;
+  try {
+    // Use standalone verifyTypedData function instead of client method
+    isValidSignature = await verifyTypedData({
+      address: exactEvmPayload.authorization.from as Address,
+      ...permitTypedData,
+      signature: exactEvmPayload.signature as Hex,
+    });
+  } catch (e) {
+    console.error("ERROR verifying typed data:", e);
     return {
       isValid: false,
-      invalidReason: "invalid_exact_evm_payload_signature", //"Invalid permit signature",
+      invalidReason: "invalid_exact_evm_payload_signature",
+      payer: exactEvmPayload.authorization.from,
+    };
+  }
+
+  if (!isValidSignature) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_exact_evm_payload_signature",
       payer: exactEvmPayload.authorization.from,
     };
   }

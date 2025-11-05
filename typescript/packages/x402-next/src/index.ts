@@ -11,6 +11,8 @@ import {
   toJsonSafe,
 } from "x402/shared";
 import { getPaywallHtml } from "x402/paywall";
+import type { Network } from "x402/types";
+import { isTestnetNetwork } from "x402/types";
 import {
   FacilitatorConfig,
   moneySchema,
@@ -239,7 +241,7 @@ export function paymentMiddleware(
                 typeof getPaywallHtml
               >[0]["paymentRequirements"],
               currentUrl: request.url,
-              testnet: network === "sepolia",
+              testnet: isTestnetNetwork(network as Network),
               cdpClientKey: paywall?.cdpClientKey,
               appLogo: paywall?.appLogo,
               appName: paywall?.appName,

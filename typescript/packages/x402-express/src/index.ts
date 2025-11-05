@@ -10,6 +10,8 @@ import {
   toJsonSafe,
   getNetworkId,
   getUsdcChainConfigForChain,
+  getAllAssetsForNetwork,
+  getExplorerUrl,
 } from "x402/shared";
 import { getPaywallHtml } from "x402/paywall";
 import {
@@ -24,9 +26,11 @@ import {
   settleResponseHeader,
   SupportedEVMNetworks,
   SupportedSVMNetworks,
+  Network,
+  isTestnetNetwork,
 } from "x402/types";
 import { useFacilitator } from "x402/verify";
-import { calculateFee, DEFAULT_PAYMENT_TIMEOUT_SECONDS, X402_VERSION } from "x402/constants";
+import { calculateFee, DEFAULT_PAYMENT_TIMEOUT_SECONDS, X402_VERSION } from "x402";
 
 /**
  * Creates a payment middleware factory for Express
@@ -97,7 +101,7 @@ export function paymentMiddleware(
       return next();
     }
 
-    const { price, network, config = {} } = matchingRoute.config;
+    const { price, network, token, config = {} } = matchingRoute.config;
     const {
       description,
       mimeType,
@@ -109,64 +113,75 @@ export function paymentMiddleware(
       discoverable,
     } = config;
 
-    const atomicAmountForAsset = processPriceToAtomicAmount(price, network);
-    if ("error" in atomicAmountForAsset) {
-      throw new Error(atomicAmountForAsset.error);
-    }
-    const { maxAmountRequired, asset } = atomicAmountForAsset;
-
     const resourceUrl: Resource =
       resource || (`${req.protocol}://${req.headers.host}${req.path}` as Resource);
 
     let paymentRequirements: PaymentRequirements[] = [];
 
-    // TODO: create a shared middleware function to build payment requirements
     // evm networks
     if (SupportedEVMNetworks.includes(network)) {
       const chainId = getNetworkId(network);
       const chainConfig = getUsdcChainConfigForChain(chainId);
 
-      // Calculate facilitator fee using shared constants
-      // Fee is deducted FROM the total amount, not added on top
-      // IMPORTANT: This must stay in sync with FeeReceiver.sol (see constants.ts)
-      const totalAmount = BigInt(maxAmountRequired);
-      const { feeAmount, merchantAmount } = calculateFee(totalAmount);
+      // Get all available tokens for this network, filtered by token if specified
+      const allAssets = getAllAssetsForNetwork(network, token);
 
-      // Determine who receives the payment
-      // If FeeReceiver contract is deployed, use it; otherwise direct to merchant (backward compatibility)
-      const actualPayTo = chainConfig?.feeReceiverAddress
-        ? getAddress(chainConfig.feeReceiverAddress)
-        : getAddress(payTo);
+      // Create a payment requirement for EACH available token
+      for (const asset of allAssets) {
+        // Parse the price for this specific asset
+        let maxAmountRequired: string;
+        if (typeof price === "string" || typeof price === "number") {
+          // Price is in USD, convert to atomic units for this asset
+          const parsedAmount = moneySchema.safeParse(price);
+          if (!parsedAmount.success) {
+            throw new Error(`Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`);
+          }
+          const parsedUsdAmount = parsedAmount.data;
+          maxAmountRequired = (parsedUsdAmount * 10 ** asset.decimals).toString();
+        } else {
+          // Price is already in atomic units with specific asset
+          maxAmountRequired = price.amount;
+        }
 
-      paymentRequirements.push({
-        scheme: "exact",
-        network,
-        maxAmountRequired: totalAmount.toString(),
-        resource: resourceUrl,
-        description: description ?? "",
-        mimeType: mimeType ?? "",
-        payTo: actualPayTo,
-        maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
-        asset: getAddress(asset.address),
-        // TODO: Rename outputSchema to requestStructure
-        outputSchema: {
-          input: {
-            type: "http",
-            method: req.method.toUpperCase(),
-            discoverable: discoverable ?? true,
-            ...inputSchema,
+        // Calculate facilitator fee using shared constants
+        const totalAmount = BigInt(maxAmountRequired);
+        const { feeAmount, merchantAmount } = calculateFee(totalAmount);
+
+        // Determine who receives the payment
+        const actualPayTo = chainConfig?.feeReceiverAddress
+          ? getAddress(chainConfig.feeReceiverAddress)
+          : getAddress(payTo);
+
+        paymentRequirements.push({
+          scheme: "exact",
+          network,
+          maxAmountRequired: totalAmount.toString(),
+          resource: resourceUrl,
+          description: description ?? "",
+          mimeType: mimeType ?? "",
+          payTo: actualPayTo,
+          maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
+          asset: getAddress(asset.address),
+          outputSchema: {
+            input: {
+              type: "http",
+              method: req.method.toUpperCase(),
+              discoverable: discoverable ?? true,
+              ...inputSchema,
+            },
+            output: outputSchema,
           },
-          output: outputSchema,
-        },
-        extra: {
-          ...(asset as ERC20TokenAmount["asset"]).eip712,
-          // Store merchant info and fee for settlement
-          merchant: getAddress(payTo),
-          merchantAmount: merchantAmount.toString(),
-          feeAmount: feeAmount.toString(),
-          useFeeReceiver: !!chainConfig?.feeReceiverAddress,
-        },
-      });
+          extra: {
+            ...(asset as ERC20TokenAmount["asset"]).eip712,
+            // Store merchant info and fee for settlement
+            merchant: getAddress(payTo),
+            merchantAmount: merchantAmount.toString(),
+            feeAmount: feeAmount.toString(),
+            useFeeReceiver: !!chainConfig?.feeReceiverAddress,
+            decimals: asset.decimals, // Include decimals for paywall to use
+          },
+        });
+      }
     }
 
     // svm networks
@@ -188,6 +203,13 @@ export function paymentMiddleware(
         throw new Error(`The facilitator did not provide a fee payer for network: ${network}.`);
       }
 
+      // Parse the price to get amount and asset
+      const atomicAmountForAsset = processPriceToAtomicAmount(price, network);
+      if ("error" in atomicAmountForAsset) {
+        throw new Error(atomicAmountForAsset.error);
+      }
+      const { maxAmountRequired, asset } = atomicAmountForAsset;
+
       paymentRequirements.push({
         scheme: "exact",
         network,
@@ -198,7 +220,6 @@ export function paymentMiddleware(
         payTo: payTo,
         maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
         asset: asset.address,
-        // TODO: Rename outputSchema to requestStructure
         outputSchema: {
           input: {
             type: "http",
@@ -222,7 +243,9 @@ export function paymentMiddleware(
     const isWebBrowser = acceptHeader.includes("text/html") && userAgent.includes("Mozilla");
 
     if (!payment) {
-      // TODO handle paywall html for solana
+      // NOTE: Solana paywall HTML generation is not yet implemented
+      // Currently falls back to JSON 402 response for Solana networks
+      // EVM networks (Ethereum, Base, Polygon, Filecoin) have full paywall HTML support
       if (isWebBrowser) {
         let displayAmount: number;
         if (typeof price === "string" || typeof price === "number") {
@@ -244,7 +267,7 @@ export function paymentMiddleware(
               typeof getPaywallHtml
             >[0]["paymentRequirements"],
             currentUrl: req.originalUrl,
-            testnet: network === "sepolia",
+            testnet: isTestnetNetwork(network as Network),
             cdpClientKey: paywall?.cdpClientKey,
             appName: paywall?.appName,
             appLogo: paywall?.appLogo,
@@ -349,6 +372,15 @@ export function paymentMiddleware(
           accepts: toJsonSafe(paymentRequirements),
         });
         return;
+      }
+
+      // Add transaction hash and explorer URL to response headers for successful payments
+      if (settleResponse.transaction) {
+        res.setHeader("X-PAYMENT-TX-HASH", settleResponse.transaction);
+        const explorerUrl = getExplorerUrl(settleResponse.network, settleResponse.transaction);
+        if (explorerUrl) {
+          res.setHeader("X-PAYMENT-TX-EXPLORER", explorerUrl);
+        }
       }
     } catch (error) {
       console.error(error);

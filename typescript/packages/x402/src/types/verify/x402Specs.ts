@@ -4,7 +4,8 @@ import { SvmAddressRegex } from "../shared/svm";
 import { Base64EncodedRegex } from "../../shared/base64";
 
 // Constants
-const EvmMaxAtomicUnits = 18;
+// Maximum number of decimal digits for uint256 values (2^256 - 1 ≈ 1.15e77)
+const MaxUint256Digits = 78;
 const EvmAddressRegex = /^0x[0-9a-fA-F]{40}$/;
 const MixedAddressRegex = /^0x[a-fA-F0-9]{40}|[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$/;
 const HexEncoded64ByteRegex = /^0x[0-9a-fA-F]{64}$/;
@@ -85,7 +86,8 @@ export type PaymentRequirements = z.infer<typeof PaymentRequirementsSchema>;
 export const ExactEvmPayloadAuthorizationSchema = z.object({
   from: z.string().regex(EvmAddressRegex),
   to: z.string().regex(EvmAddressRegex),
-  value: z.string().refine(isInteger).refine(hasMaxLength(EvmMaxAtomicUnits)),
+  // value is an integer string representing atomic units. Allow up to uint256 max digits.
+  value: z.string().refine(isInteger).refine(hasMaxLength(MaxUint256Digits)),
   validAfter: z.string().refine(isInteger),
   validBefore: z.string().refine(isInteger),
   nonce: z.string().regex(HexEncoded64ByteRegex),
