@@ -25,7 +25,7 @@
  */
 import { config } from "dotenv";
 import express, { Request, Response } from "express";
-import { verify, settle } from "x402/facilitator";
+import { verify, settle } from "x402-v/facilitator";
 import {
   PaymentRequirementsSchema,
   type PaymentRequirements,
@@ -40,7 +40,7 @@ import {
   SupportedPaymentKind,
   isSvmSignerWallet,
   type X402Config,
-} from "x402/types";
+} from "x402-v/types";
 
 config();
 
@@ -163,7 +163,7 @@ app.get("/supported", async (_req: Request, res: Response) => {
       { x402Version: 1, scheme: "exact", network: "polygon" },
       { x402Version: 1, scheme: "exact", network: "avalanche" },
       { x402Version: 1, scheme: "exact", network: "filecoin" },
-      { x402Version: 1, scheme: "exact", network: "filecoin-calibration" }
+      { x402Version: 1, scheme: "exact", network: "filecoin-calibration" },
     );
   }
 
@@ -183,7 +183,7 @@ app.get("/supported", async (_req: Request, res: Response) => {
         scheme: "exact",
         network: "solana",
         extra: { feePayer },
-      }
+      },
     );
   }
 
@@ -224,6 +224,8 @@ app.listen(PORT, () => {
   console.log(`✅ x402 Facilitator Service`);
   console.log(`   URL: http://localhost:${PORT}`);
   console.log(`   Environment: ${NODE_ENV}`);
-  console.log(`   Networks: ${EVM_PRIVATE_KEY ? "EVM" : ""}${EVM_PRIVATE_KEY && SVM_PRIVATE_KEY ? " + " : ""}${SVM_PRIVATE_KEY ? "Solana" : ""}`);
+  console.log(
+    `   Networks: ${EVM_PRIVATE_KEY ? "EVM" : ""}${EVM_PRIVATE_KEY && SVM_PRIVATE_KEY ? " + " : ""}${SVM_PRIVATE_KEY ? "Solana" : ""}`,
+  );
   console.log(`\n   Ready to process payments on testnet and mainnet`);
 });
