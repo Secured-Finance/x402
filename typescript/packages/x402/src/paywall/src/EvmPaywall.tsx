@@ -257,11 +257,11 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         <h1 className="title">Payment Required</h1>
         <p>
           {paymentRequirement.description && `${paymentRequirement.description}.`} To access this
-          content, please pay ${amount} {chainName} {stableSymbol}.
+          content, please pay ${amount} {stableSymbol}.
         </p>
         {testnet && (
           <p className="instructions">
-            Need {chainName} {stableSymbol}?{" "}
+            Need {stableSymbol}?{" "}
             <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer">
               Get some <u>here</u>.
             </a>

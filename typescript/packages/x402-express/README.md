@@ -1,199 +1,129 @@
-# x402-express
+# x402-payments
 
-Express middleware integration for the x402 Payment Protocol. This package allows you to easily add paywall functionality to your Express.js applications using the x402 protocol.
+**Express Middleware for HTTP 402 Payment Required**
+
+Add blockchain payments to your Express API in minutes. Accept USDC, JPYC, and USDFC with automatic payment splitting via FeeReceiver contract.
+
+[![npm version](https://badge.fury.io/js/x402-payments.svg)](https://www.npmjs.com/package/x402-payments)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Features
+
+- ✅ **Drop-in Express middleware** - Add payments with 3 lines of code  
+- ✅ **Multi-token support** - USDC, JPYC, USDFC
+- ✅ **Multi-network** - Sepolia, Ethereum Mainnet, Filecoin Calibration, Filecoin Mainnet
+- ✅ **Gasless for users** - EIP-3009 transfers (no gas fees for payers)
+- ✅ **FeeReceiver contract** - Automatic 0.3% platform fee split
+- ✅ **Token filtering** - Restrict accepted tokens per endpoint
+- ✅ **Transaction tracking** - Full tx hash and explorer URL support
+- ✅ **Dynamic pricing** - Calculate prices on-the-fly
+- ✅ **TypeScript** - Full type safety
 
 ## Installation
 
-```bash
-npm install x402-express
-```
+\`\`\`bash
+npm install x402-payments x402
+\`\`\`
 
 ## Quick Start
 
-```typescript
-import express from "express";
-import { paymentMiddleware, Network } from "x402-express";
+\`\`\`typescript
+import express from 'express';
+import { paymentMiddleware, Resource } from 'x402-payments';
 
 const app = express();
 
-// Configure the payment middleware
-app.use(paymentMiddleware(
-  "0xYourAddress",
-  {
-    "/protected-route": {
-      price: "$0.10",
-      network: "base-sepolia",
-      config: {
-        description: "Access to premium content",
+app.get('/premium-content',
+  paymentMiddleware(
+    '0xYourWalletAddress',
+    {
+      'GET /premium-content': {
+        price: '$1.00',
+        network: 'sepolia'
       }
+    },
+    {
+      url: 'https://x402-0ti6.onrender.com' as Resource
     }
-  }
-));
-
-// Implement your route
-app.get("/protected-route", 
+  ),
   (req, res) => {
-    res.json({ message: "This content is behind a paywall" });
+    res.json({ message: 'This is premium content!' });
   }
 );
 
 app.listen(3000);
-```
+\`\`\`
 
-## Configuration
+## Dynamic Pricing Example
 
-The `paymentMiddleware` function accepts three parameters:
+\`\`\`typescript
+import { paymentMiddleware, Resource } from 'x402-payments';
 
-1. `payTo`: Your receiving address (`0x${string}`)
-2. `routes`: Route configurations for protected endpoints
-3. `facilitator`: (Optional) Configuration for the x402 facilitator service
-4. `paywall`: (Optional) Configuration for the built-in paywall
+const PAY_TO = '0x3D0eAE988A2790EE25316FEdaCC87883438FC303' as \`0x\${string}\`;
+const FACILITATOR_URL = 'https://x402-0ti6.onrender.com' as Resource;
 
-See the Middleware Options section below for detailed configuration options.
+app.post('/checkout', (req, res, next) => {
+  // Calculate dynamic price
+  const items = req.body.items;
+  const subtotal = items.reduce((sum, item) => sum + (item.price * item.qty), 0);
+  
+  // Get network and token from request
+  const selectedNetwork = req.body.network || 'filecoin-calibration';
+  const selectedToken = req.body.token;
+  
+  // Store cart info
+  (req as any).cartInfo = { subtotal, items };
+  
+  // Apply middleware with dynamic price
+  const middleware = paymentMiddleware(
+    PAY_TO,
+    {
+      'POST /checkout': {
+        price: \`$\${subtotal}\`,
+        network: selectedNetwork as any,
+        ...(selectedToken && { token: selectedToken as any }),
+      },
+    },
+    {
+      url: FACILITATOR_URL,
+    }
+  );
+  
+  middleware(req, res, next);
+}, (req, res) => {
+  const cartInfo = (req as any).cartInfo;
+  
+  // Get transaction hash from response headers
+  const txHash = res.getHeader('X-PAYMENT-TX-HASH') as string;
+  const explorerUrl = res.getHeader('X-PAYMENT-EXPLORER-URL') as string;
+  
+  res.json({
+    ok: true,
+    message: 'Purchase successful!',
+    subtotal: cartInfo.subtotal,
+    payment: {
+      status: 'settled',
+      transactionHash: txHash,
+      explorerUrl: explorerUrl,
+    },
+  });
+});
+\`\`\`
 
-## Middleware Options
+## Supported Networks
 
-The middleware supports various configuration options:
+| Network | Type | Use Case |
+|---------|------|----------|
+| \`sepolia\` | Ethereum Testnet | Development and testing |
+| \`mainnet\` | Ethereum Mainnet | Production payments |
+| \`filecoin-calibration\` | Filecoin Testnet | Development and testing |
+| \`filecoin\` | Filecoin Mainnet | Production payments on FEVM |
 
-### Route Configuration
+## Supported Tokens
 
-```typescript
-type RoutesConfig = Record<string, Price | RouteConfig>;
+| Token | Networks | Decimals |
+|-------|----------|----------|
+| USDC | Sepolia, Mainnet | 6 |
+| JPYC | Sepolia, Mainnet | 6 |
+| USDFC | Filecoin Calibration, Filecoin | 18 |
 
-interface RouteConfig {
-  price: Price;           // Price in USD or token amount
-  network: Network;       // "base" or "base-sepolia"
-  config?: PaymentMiddlewareConfig;
-}
-```
-
-### Payment Configuration
-
-```typescript
-interface PaymentMiddlewareConfig {
-  description?: string;               // Description of the payment
-  mimeType?: string;                  // MIME type of the resource
-  maxTimeoutSeconds?: number;         // Maximum time for payment (default: 60)
-  outputSchema?: Record<string, any>; // JSON schema for the response
-  customPaywallHtml?: string;         // Custom HTML for the paywall
-  resource?: string;                  // Resource URL (defaults to request URL)
-}
-```
-
-### Facilitator Configuration
-
-```typescript
-type FacilitatorConfig = {
-  url: string;                        // URL of the x402 facilitator service
-  createAuthHeaders?: CreateHeaders;  // Optional function to create authentication headers
-};
-```
-
-### Paywall Configuration
-
-For more on paywall configuration options, refer to the [paywall README](../x402/src/paywall/README.md).
-
-```typescript
-type PaywallConfig = {
-  cdpClientKey?: string;              // Your CDP Client API Key
-  appName?: string;                   // Name displayed in the paywall wallet selection modal
-  appLogo?: string;                   // Logo for the paywall wallet selection modal
-  sessionTokenEndpoint?: string;      // API endpoint for Coinbase Onramp session authentication
-};
-```
-
-## Optional: Coinbase Onramp Integration
-
-**Note**: Onramp integration is completely optional. Your x402 paywall will work perfectly without it. This feature is for users who want to provide an easy way for their customers to fund their wallets directly from the paywall.
-
-When configured, a "Get more USDC" button will appear in your paywall, allowing users to purchase USDC directly through Coinbase Onramp.
-
-### Quick Setup
-
-#### 1. Create the Session Token Route
-
-Add a session token endpoint to your Express app:
-
-```typescript
-import express from "express";
-import { POST } from "x402-express/session-token";
-
-const app = express();
-
-// Add the session token endpoint
-app.post("/api/x402/session-token", POST);
-```
-
-#### 2. Configure Your Middleware
-
-Add `sessionTokenEndpoint` to your middleware configuration. This tells the paywall where to find your session token API:
-
-```typescript
-app.use(paymentMiddleware(
-  payTo,
-  routes,
-  facilitator,
-  {
-    sessionTokenEndpoint: "/api/x402/session-token",
-    cdpClientKey: "your-cdp-client-key",
-  }
-));
-```
-
-**Important**: The `sessionTokenEndpoint` must match the route you created above. You can use any path you prefer - just make sure both the route and configuration use the same path. Without this configuration, the "Get more USDC" button will be hidden.
-
-#### 3. Get CDP API Keys
-
-1. Go to [CDP Portal](https://portal.cdp.coinbase.com/)
-2. Navigate to your project's **[API Keys](https://portal.cdp.coinbase.com/projects/api-keys)**
-3. Click **Create API key**
-4. Download and securely store your API key
-
-#### 4. Enable Onramp Secure Initialization in CDP Portal
-
-1. Go to [CDP Portal](https://portal.cdp.coinbase.com/)
-2. Navigate to **Payments → [Onramp & Offramp](https://portal.cdp.coinbase.com/products/onramp)**
-3. Toggle **"Enforce secure initialization"** to **Enabled**
-
-#### 5. Set Environment Variables
-
-Add your CDP API keys to your environment:
-
-```bash
-# .env
-CDP_API_KEY_ID=your_secret_api_key_id_here
-CDP_API_KEY_SECRET=your_secret_api_key_secret_here
-```
-
-### How Onramp Works
-
-Once set up, your x402 paywall will automatically show a "Get more USDC" button when users need to fund their wallets. 
-
-1. **Generates session token**: Your backend securely creates a session token using CDP's API
-2. **Opens secure onramp**: User is redirected to Coinbase Onramp with the session token
-3. **No exposed data**: Wallet addresses and app IDs are never exposed in URLs
-
-### Troubleshooting Onramp
-
-#### Common Issues
-
-1. **"Missing CDP API credentials"**
-    - Ensure `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set
-    - Verify you're using **Secret API Keys**, not Client API Keys
-
-2. **"Failed to generate session token"**
-    - Check your CDP Secret API key has proper permissions
-    - Verify your project has Onramp enabled
-
-3. **API route not found**
-    - Ensure you've added the session token route: `app.post("/your-path", POST)`
-    - Check that your route path matches your `sessionTokenEndpoint` configuration
-    - Verify the import: `import { POST } from "x402-express/session-token"`
-    - Example: If you configured `sessionTokenEndpoint: "/api/custom/onramp"`, add `app.post("/api/custom/onramp", POST)`
-
-
-## Resources
-
-- [x402 Protocol](https://x402.org)
-- [CDP Documentation](https://docs.cdp.coinbase.com)
-- [CDP Discord](https://discord.com/invite/cdp)

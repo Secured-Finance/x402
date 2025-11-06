@@ -25,7 +25,7 @@
  */
 import { config } from "dotenv";
 import express, { Request, Response } from "express";
-import { verify, settle } from "x402-v/facilitator";
+import { verify, settle } from "x402/facilitator";
 import {
   PaymentRequirementsSchema,
   type PaymentRequirements,
@@ -40,7 +40,7 @@ import {
   SupportedPaymentKind,
   isSvmSignerWallet,
   type X402Config,
-} from "x402-v/types";
+} from "x402/types";
 
 config();
 
