@@ -142,6 +142,22 @@ export async function verify<
     };
   }
 
+  // Verify nonce has not already been used (replay protection)
+  const authState = await client.readContract({
+    address: erc20Address,
+    abi,
+    functionName: "authorizationState",
+    args: [exactEvmPayload.authorization.from as Address, exactEvmPayload.authorization.nonce as Hex],
+  });
+
+  if (authState === true) {
+    return {
+      isValid: false,
+      invalidReason: "nonce_already_used",
+      payer: exactEvmPayload.authorization.from,
+    };
+  }
+
   // Verify that payment was made to the correct address
   if (getAddress(exactEvmPayload.authorization.to) !== getAddress(paymentRequirements.payTo)) {
     return {
