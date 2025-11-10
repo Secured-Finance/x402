@@ -5,7 +5,6 @@ import { WagmiProvider, createConfig, http } from "wagmi";
 import { base, baseSepolia, mainnet, sepolia, filecoin, filecoinCalibration } from "viem/chains";
 
 import { choosePaymentRequirement, isEvmNetwork } from "./paywallUtils";
-import "./window";
 
 const queryClient = new QueryClient();
 

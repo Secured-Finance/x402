@@ -1,6 +1,10 @@
 {
   "name": "@secured-finance/sf-x402",
   "version": "0.0.1",
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
   "types": "./dist/cjs/index.d.ts",

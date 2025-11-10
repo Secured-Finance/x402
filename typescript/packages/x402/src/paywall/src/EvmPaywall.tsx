@@ -13,7 +13,7 @@ import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
 
 import type { PaymentRequirements } from "../../types/verify";
 import { exact } from "../../schemes";
-import { getStablecoinBalance, getStablecoinSymbol } from "../../shared/evm";
+import { getStablecoinBalance } from "../../shared/evm";
 import type { Network } from "../../types/shared";
 
 import { Spinner } from "./Spinner";
@@ -44,19 +44,12 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
   const [isCorrectChain, setIsCorrectChain] = useState<boolean | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [formattedStableBalance, setFormattedStableBalance] = useState<string>("");
-  const [stableSymbol, setStableSymbol] = useState<string>("USDC");
   const [hideBalance, setHideBalance] = useState(true);
 
   const x402 = window.x402;
-  // Get decimals from payment requirements, default to 6 for backwards compatibility
-  const decimals = (paymentRequirement.extra?.decimals as number) ?? 6;
-  const amount =
-    typeof x402.amount === "number"
-      ? x402.amount
-      : Number(paymentRequirement.maxAmountRequired ?? 0) / 10 ** decimals;
-
   const network = paymentRequirement.network as Network;
-  // Map network identifier to correct chain
+
+  // Map network identifier to correct chain - MUST BE BEFORE chainConfig
   let paymentChain;
   switch (network) {
     case "sepolia":
@@ -79,10 +72,35 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       paymentChain = mainnet;
       break;
   }
+
   const chainId = paymentChain.id;
   const chainName = getNetworkDisplayName(network);
   const testnet = isTestnetNetwork(network);
   const showOnramp = Boolean(!testnet && isConnected && x402.sessionTokenEndpoint);
+
+  // Get decimals from payment requirements, default to 6 for backwards compatibility
+  const decimals = (paymentRequirement.extra?.decimals as number) ?? 6;
+  const amount =
+    typeof x402.amount === "number"
+      ? x402.amount
+      : Number(paymentRequirement.maxAmountRequired ?? 0) / 10 ** decimals;
+
+  // Get the actual token symbol from the asset address
+  const tokenAddress = paymentRequirement.asset as `0x${string}`;
+  const chainConfig = x402.config.chainConfig[chainId.toString()];
+
+  // Determine token symbol by matching address using useMemo to avoid re-computation
+  const stableSymbol = useMemo(() => {
+    if (!chainConfig) return "USDC";
+    const lowerToken = tokenAddress.toLowerCase();
+    if (chainConfig.jpycAddress && chainConfig.jpycAddress.toLowerCase() === lowerToken) {
+      return "JPYC";
+    }
+    if (chainConfig.usdfcAddress && chainConfig.usdfcAddress.toLowerCase() === lowerToken) {
+      return "USDFC";
+    }
+    return "USDC";
+  }, [chainConfig, tokenAddress]);
 
   const publicClient = useMemo(
     () =>
@@ -97,7 +115,22 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     if (!address) {
       return;
     }
-    const balance = await getStablecoinBalance(publicClient, address);
+    // Read balance of the specific token from payment requirements
+    const balance = await publicClient.readContract({
+      address: tokenAddress,
+      abi: [
+        {
+          inputs: [{ name: "account", type: "address" }],
+          name: "balanceOf",
+          outputs: [{ type: "uint256" }],
+          stateMutability: "view",
+          type: "function",
+        },
+      ],
+      functionName: "balanceOf",
+      args: [address],
+    }) as bigint;
+
     const formattedBalance = formatUnits(balance, decimals);
     // Format to 2-4 decimal places for cleaner display
     const num = parseFloat(formattedBalance);
@@ -106,7 +139,7 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       maximumFractionDigits: 4,
     });
     setFormattedStableBalance(formatted);
-  }, [address, publicClient, decimals]);
+  }, [address, publicClient, decimals, tokenAddress]);
 
   const handleSwitchChain = useCallback(async () => {
     if (isCorrectChain) {
@@ -128,11 +161,8 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     }
 
     void handleSwitchChain();
-    // Resolve symbol dynamically (USDC/USDFC)
-    const symbol = getStablecoinSymbol(publicClient) || "USDC";
-    setStableSymbol(symbol);
     void checkStableBalance();
-  }, [address, handleSwitchChain, checkStableBalance, publicClient]);
+  }, [address, handleSwitchChain, checkStableBalance]);
 
   useEffect(() => {
     if (isConnected && chainId === connectedChainId) {
@@ -300,7 +330,9 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
               </div>
               <div className="payment-row">
                 <span className="payment-label">Amount:</span>
-                <span className="payment-value">${amount} {stableSymbol}</span>
+                <span className="payment-value">
+                  ${amount} {stableSymbol}
+                </span>
               </div>
               <div className="payment-row">
                 <span className="payment-label">Network:</span>

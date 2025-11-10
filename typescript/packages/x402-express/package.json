@@ -15,6 +15,10 @@
     "lint": "eslint . --ext .ts --fix",
     "lint:check": "eslint . --ext .ts"
   },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
   "keywords": [],
   "license": "Apache-2.0",
   "author": "Secured Finance",
