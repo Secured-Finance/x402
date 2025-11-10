@@ -13,7 +13,6 @@ import { getVersion, getERC20Balance } from "../../../shared/evm";
 import {
   usdcABI as abi,
   authorizationTypes,
-  config,
   ConnectedClient,
   SignerWallet,
   feeReceiverABI,
@@ -82,8 +81,14 @@ export async function verify<
   let version: string;
   try {
     chainId = getNetworkId(payload.network);
-    name = paymentRequirements.extra?.name ?? config[chainId.toString()].usdcName;
     erc20Address = paymentRequirements.asset as Address;
+
+    // Use the token name from payment requirements (e.g., "JPYC", "USDC", "USDFC")
+    if (!paymentRequirements.extra?.name) {
+      throw new Error("Token name not found in payment requirements");
+    }
+    name = paymentRequirements.extra.name;
+
     version = paymentRequirements.extra?.version ?? (await getVersion(client));
   } catch (e) {
     console.error("ERROR in verification setup:", e);
@@ -147,7 +152,10 @@ export async function verify<
     address: erc20Address,
     abi,
     functionName: "authorizationState",
-    args: [exactEvmPayload.authorization.from as Address, exactEvmPayload.authorization.nonce as Hex],
+    args: [
+      exactEvmPayload.authorization.from as Address,
+      exactEvmPayload.authorization.nonce as Hex,
+    ],
   });
 
   if (authState === true) {

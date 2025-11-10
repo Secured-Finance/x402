@@ -134,7 +134,12 @@ export function getAllAssetsForNetwork(network: Network, tokenFilter?: "USDC" | 
     throw new Error(`Unable to get assets for ${network}`);
   }
 
-  const assets: Array<{ symbol: string; address: Address | string; decimals: number; eip712: { name: string; version: string } }> = [];
+  const assets: Array<{
+    symbol: string;
+    address: Address | string;
+    decimals: number;
+    eip712: { name: string; version: string };
+  }> = [];
 
   // Add USDC if available
   if (chainConfig.usdcAddress && chainConfig.usdcName) {
@@ -154,10 +159,10 @@ export function getAllAssetsForNetwork(network: Network, tokenFilter?: "USDC" | 
     assets.push({
       symbol: "JPYC",
       address: chainConfig.jpycAddress,
-      decimals: 6,
+      decimals: 18,
       eip712: {
         name: chainConfig.jpycName,
-        version: "2",
+        version: "1",
       },
     });
   }
@@ -183,7 +188,9 @@ export function getAllAssetsForNetwork(network: Network, tokenFilter?: "USDC" | 
   if (tokenFilter) {
     const filtered = assets.filter(asset => asset.symbol === tokenFilter);
     if (filtered.length === 0) {
-      throw new Error(`Token ${tokenFilter} is not available on ${network}. Available tokens: ${assets.map(a => a.symbol).join(", ")}`);
+      throw new Error(
+        `Token ${tokenFilter} is not available on ${network}. Available tokens: ${assets.map(a => a.symbol).join(", ")}`,
+      );
     }
     return filtered;
   }

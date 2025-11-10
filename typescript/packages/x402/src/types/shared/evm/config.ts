@@ -40,7 +40,7 @@ export const config: Record<string, ChainConfig> = {
     usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     usdcName: "USDC",
     jpycAddress: "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
-    jpycName: "JPYC",
+    jpycName: "JPY Coin",
     feeReceiverAddress: "0x0d06F661a4fCB8CF357dCc40b0938eD1f6aC7172", // ✅ Deployed
     blockExplorer: "https://sepolia.etherscan.io",
   },
@@ -146,6 +146,7 @@ export type ChainConfig = {
  * @param txHash - The transaction hash
  * @returns Full URL to view the transaction, or empty string if explorer not configured
  */
+
 export function getExplorerUrl(network: Network, txHash: string): string {
   const NETWORK_TO_CHAIN_ID: Record<string, string> = {
     "sepolia": "11155111",

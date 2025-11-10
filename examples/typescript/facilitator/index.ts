@@ -25,7 +25,8 @@
  */
 import { config } from "dotenv";
 import express, { Request, Response } from "express";
-import { verify, settle } from "x402/facilitator";
+import rateLimit from "express-rate-limit";
+import { verify, settle } from "@secured-finance/sf-x402/facilitator";
 import {
   PaymentRequirementsSchema,
   type PaymentRequirements,
@@ -40,7 +41,7 @@ import {
   SupportedPaymentKind,
   isSvmSignerWallet,
   type X402Config,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 
 config();
 
@@ -63,6 +64,17 @@ const x402Config: X402Config | undefined = SVM_RPC_URL
 const app = express();
 
 app.use(express.json());
+
+// Rate limiting: 100 requests per minute per IP
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // 100 requests per IP
+  message: { error: "Too many requests, please slow down" },
+  standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
+  legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+app.use(limiter);
 
 if (NODE_ENV === "development") {
   app.use((req, _res, next) => {

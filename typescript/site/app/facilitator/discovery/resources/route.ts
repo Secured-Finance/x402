@@ -3,7 +3,7 @@ import {
   ListDiscoveryResourcesRequest,
   ListDiscoveryResourcesResponse,
   ListDiscoveryResourcesResponseSchema,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 
 /**
  * This route is used to discover the available services on the facilitator.

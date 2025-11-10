@@ -1,7 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import { Address, getAddress } from "viem";
 import { Address as SolanaAddress } from "@solana/kit";
-import { exact } from "x402/schemes";
+import { exact } from "@secured-finance/sf-x402/schemes";
 import {
   computeRoutePatterns,
   findMatchingPaymentRequirements,
@@ -12,8 +12,8 @@ import {
   getUsdcChainConfigForChain,
   getAllAssetsForNetwork,
   getExplorerUrl,
-} from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
+} from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
 import {
   FacilitatorConfig,
   ERC20TokenAmount,
@@ -28,9 +28,13 @@ import {
   SupportedSVMNetworks,
   Network,
   isTestnetNetwork,
-} from "x402/types";
-import { useFacilitator } from "x402/verify";
-import { calculateFee, DEFAULT_PAYMENT_TIMEOUT_SECONDS, X402_VERSION } from "x402";
+} from "@secured-finance/sf-x402/types";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
+import {
+  calculateFee,
+  DEFAULT_PAYMENT_TIMEOUT_SECONDS,
+  X402_VERSION,
+} from "@secured-finance/sf-x402";
 
 /**
  * Creates a payment middleware factory for Express
@@ -134,7 +138,9 @@ export function paymentMiddleware(
           // Price is in USD, convert to atomic units for this asset
           const parsedAmount = moneySchema.safeParse(price);
           if (!parsedAmount.success) {
-            throw new Error(`Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`);
+            throw new Error(
+              `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
+            );
           }
           const parsedUsdAmount = parsedAmount.data;
           maxAmountRequired = (parsedUsdAmount * 10 ** asset.decimals).toString();
@@ -409,5 +415,5 @@ export type {
   Resource,
   RouteConfig,
   RoutesConfig,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 export type { Address as SolanaAddress } from "@solana/kit";
