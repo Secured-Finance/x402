@@ -124,11 +124,11 @@ export async function verify<
 
   let isValidSignature;
   try {
-    // Use standalone verifyTypedData function instead of client method
+    const { signature } = parseErc6492Signature(exactEvmPayload.signature as Hex);
     isValidSignature = await verifyTypedData({
       address: exactEvmPayload.authorization.from as Address,
       ...permitTypedData,
-      signature: exactEvmPayload.signature as Hex,
+      signature: signature,
     });
   } catch (e) {
     console.error("ERROR verifying typed data:", e);

@@ -37,6 +37,23 @@ import {
 } from "@secured-finance/sf-x402";
 
 /**
+ * Converts a USD amount to atomic units
+ *
+ * @param usdAmount - The USD amount to convert
+ * @param decimals - The number of decimals for the token
+ * @returns The atomic units
+ */
+function usdToAtomic(usdAmount: number, decimals: number): string {
+  const parts = usdAmount.toString().split(".");
+  const dollars = parts[0];
+  const cents = parts[1] ?? "";
+
+  const padded = cents.padEnd(decimals, "0").slice(0, decimals);
+  const atomic = dollars + padded;
+  return BigInt(atomic).toString();
+}
+
+/**
  * Creates a payment middleware factory for Express
  *
  * @param payTo - The address to receive payments
@@ -143,7 +160,7 @@ export function paymentMiddleware(
             );
           }
           const parsedUsdAmount = parsedAmount.data;
-          maxAmountRequired = (parsedUsdAmount * 10 ** asset.decimals).toString();
+          maxAmountRequired = usdToAtomic(parsedUsdAmount, asset.decimals);
         } else {
           // Price is already in atomic units with specific asset
           maxAmountRequired = price.amount;

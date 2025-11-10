@@ -123,6 +123,7 @@ export function findMatchingRoute(
  */
 /**
  * Get all available assets for a network, optionally filtered by token symbol
+ *
  * @param network - The network to get assets for
  * @param tokenFilter - Optional token symbol to filter by ("USDC", "JPYC", "USDFC")
  * @returns Array of available assets matching the filter
@@ -200,6 +201,7 @@ export function getAllAssetsForNetwork(network: Network, tokenFilter?: "USDC" | 
 
 /**
  * Get default (first) asset for a network
+ *
  * @param network - The network to get the default asset for
  * @returns The default asset
  */

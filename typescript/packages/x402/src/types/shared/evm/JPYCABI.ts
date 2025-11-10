@@ -541,4 +541,4 @@ export const JPYC_ABI = [
     stateMutability: "payable",
     type: "function",
   },
-];
+] as const;

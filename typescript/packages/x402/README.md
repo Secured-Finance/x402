@@ -1,11 +1,11 @@
 # x402
 
-Core TypeScript implementation of the x402 Payment Protocol. This package provides the foundational types, schemas, and utilities that power all x402 integrations.
+Core TypeScript implementation of the x402 Payment Protocol. This package provides the foundational types, schemas, and utilities that power all x402 integrations that supports JPYC & USDFC on EVM and FEVM respectively.
 
 ## Installation
 
 ```bash
-npm install x402
+npm install @secured-finance/sf-x402
 ```
 
 ## Overview
@@ -21,9 +21,9 @@ The x402 package provides the core building blocks for implementing the x402 Pay
 
 This core package is used by the following integration packages:
 
-- `x402-express`: Express.js middleware
-- `x402-hono`: Hono middleware
-- `x402-next`: Next.js middleware
+- `@secured-finance/sf-x402-express`: Express.js middleware
+- `@secured-finance/sf-x402-hono`: Hono middleware
+- `@secured-finance/sf-x402-next`: Next.js middleware
 - `x402-fetch`: Fetch API wrapper
 - `x402-axios`: Axios interceptor
 
@@ -36,7 +36,7 @@ If you're not using one of our server middleware packages, you can implement the
 3. Use the facilitator to settle payments
 4. Return the appropriate response header to the caller
 
-For a complete example implementation, see our [advanced server example](https://github.com/coinbase/x402/tree/main/examples/typescript/servers/advanced) which demonstrates both synchronous and asynchronous payment processing patterns.
+For a complete example implementation, see our [advanced server example](https://github.com/Secured-Finance/x402/tree/main/examples/typescript/servers/advanced) which demonstrates both synchronous and asynchronous payment processing patterns.
 
 ## Manual Client Integration
 
@@ -55,6 +55,6 @@ If you're not using our `x402-fetch` or `x402-axios` packages, you can manually 
    - The `Access-Control-Expose-Headers` field set to `"X-PAYMENT-RESPONSE"` to receive the server's transaction response
 
 For implementation examples, we recommend reviewing our official client packages:
-- [x402-fetch implementation](https://github.com/coinbase/x402/blob/main/typescript/packages/x402-fetch/src/index.ts)
-- [x402-axios implementation](https://github.com/coinbase/x402/blob/main/typescript/packages/x402-axios/src/index.ts)
+- [x402-fetch implementation](https://github.com/Secured-Finance/x402/blob/main/typescript/packages/x402-fetch/src/index.ts)
+- [x402-axios implementation](https://github.com/Secured-Finance/x402/blob/main/typescript/packages/x402-axios/src/index.ts)
 
