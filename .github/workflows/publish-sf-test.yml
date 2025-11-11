@@ -1,0 +1,71 @@
+name: Publish x402 Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: 'Which package to publish'
+        required: true
+        type: choice
+        options:
+          - x402
+          - x402-express
+          - both
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          registry-url: 'https://npm.pkg.github.com'
+      - name: Install dependencies
+        run: pnpm install
+        working-directory: ./typescript
+      - name: Build x402
+        if: inputs.package == 'x402' || inputs.package == 'both' || inputs.package == 'x402-express'
+        run: pnpm --filter "@secured-finance/sf-x402" build
+        working-directory: ./typescript
+
+      - name: Build x402-express
+        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        run: pnpm --filter "@secured-finance/sf-x402-express" build
+        working-directory: ./typescript
+
+      - name: Bump x402 version
+        if: inputs.package == 'x402' || inputs.package == 'both'
+        run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
+        working-directory: ./typescript/packages/x402
+
+      - name: Bump x402-express version
+        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
+        working-directory: ./typescript/packages/x402-express
+
+      - name: Publish x402
+        if: inputs.package == 'x402' || inputs.package == 'both'
+        run: pnpm --filter "@secured-finance/sf-x402" publish --registry=https://npm.pkg.github.com --no-git-checks
+        working-directory: ./typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish x402-express
+        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        run: pnpm --filter "@secured-finance/sf-x402-express" publish --registry=https://npm.pkg.github.com --no-git-checks
+        working-directory: ./typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
