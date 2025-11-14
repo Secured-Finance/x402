@@ -16,6 +16,7 @@ import {
   ConnectedClient,
   SignerWallet,
   feeReceiverABI,
+  createConnectedClient,
 } from "../../../types/shared/evm";
 import {
   PaymentPayload,
@@ -25,6 +26,7 @@ import {
   ExactEvmPayload,
 } from "../../../types/verify";
 import { SCHEME } from "..";
+import { X402Config } from "../../../types";
 
 /**
  * Verifies a payment payload against the required payment details
@@ -40,6 +42,7 @@ import { SCHEME } from "..";
  * @param client - The public client used for blockchain interactions
  * @param payload - The signed payment payload containing transfer parameters and signature
  * @param paymentRequirements - The payment requirements that the payload must satisfy
+ * @param config - X402Config
  * @returns A ValidPaymentRequest indicating if the payment is valid and any invalidation reason
  */
 export async function verify<
@@ -50,6 +53,7 @@ export async function verify<
   client: ConnectedClient<transport, chain, account>,
   payload: PaymentPayload,
   paymentRequirements: PaymentRequirements,
+  config?: X402Config,
 ): Promise<VerifyResponse> {
   /* TODO: work with security team on brainstorming more verification steps
   verification steps:
@@ -65,6 +69,17 @@ export async function verify<
     */
 
   const exactEvmPayload = payload.payload as ExactEvmPayload;
+  // ✅ Use custom RPC URL if provided via config
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let clientToUse: any = client;
+  try {
+    const rpcUrl = config?.evmConfig?.rpcUrls?.[payload.network];
+    if (rpcUrl) {
+      clientToUse = createConnectedClient(payload.network, rpcUrl);
+    }
+  } catch (e) {
+    console.warn("Falling back to default client (invalid custom RPC)", e);
+  }
 
   // Verify payload version
   if (payload.scheme !== SCHEME || paymentRequirements.scheme !== SCHEME) {
@@ -89,7 +104,7 @@ export async function verify<
     }
     name = paymentRequirements.extra.name;
 
-    version = paymentRequirements.extra?.version ?? (await getVersion(client));
+    version = paymentRequirements.extra?.version ?? (await getVersion(clientToUse));
   } catch (e) {
     console.error("ERROR in verification setup:", e);
     return {
@@ -196,7 +211,7 @@ export async function verify<
   }
   // Verify client has enough funds to cover paymentRequirements.maxAmountRequired
   const balance = await getERC20Balance(
-    client,
+    clientToUse,
     erc20Address,
     exactEvmPayload.authorization.from as Address,
   );
@@ -231,17 +246,19 @@ export async function verify<
  * @param wallet - The facilitator wallet that will submit the transaction
  * @param paymentPayload - The signed payment payload containing the transfer parameters and signature
  * @param paymentRequirements - The original payment details that were used to create the payload
+ * @param config - X402 config
  * @returns A PaymentExecutionResponse containing the transaction status and hash
  */
 export async function settle<transport extends Transport, chain extends Chain>(
   wallet: SignerWallet<chain, transport>,
   paymentPayload: PaymentPayload,
   paymentRequirements: PaymentRequirements,
+  config?: X402Config,
 ): Promise<SettleResponse> {
   const payload = paymentPayload.payload as ExactEvmPayload;
 
   // re-verify to ensure the payment is still valid
-  const valid = await verify(wallet, paymentPayload, paymentRequirements);
+  const valid = await verify(wallet, paymentPayload, paymentRequirements, config);
 
   if (!valid.isValid) {
     return {

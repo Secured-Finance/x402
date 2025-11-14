@@ -59,16 +59,22 @@ export type EvmSigner = SignerWallet<Chain, Transport, Account> | LocalAccount;
  * Creates a public client configured for the specified network
  *
  * @param network - The network to connect to
+ * @param rpcurl - RPC url
  * @returns A public client instance connected to the specified chain
  */
 export function createConnectedClient(
   network: string,
+  rpcurl?: string,
 ): ConnectedClient<Transport, Chain, undefined> {
   const chain = getChainFromNetwork(network);
 
   return createPublicClient({
     chain,
-    transport: http(),
+    transport: http(rpcurl, {
+      timeout: 30_000, // 30 second timeout for production reliability
+      retryCount: 3, // Retry failed requests up to 3 times
+      retryDelay: 1000, // 1 second delay between retries
+    }),
   }).extend(publicActions);
 }
 
@@ -105,14 +111,23 @@ export function createClientAvalancheFuji(): ConnectedClient<
  *
  * @param network - The network to connect to
  * @param privateKey - The private key to use for signing transactions
+ * @param rpcUrl - RPC Url
  * @returns A wallet client instance connected to the specified chain with the provided private key
  */
-export function createSigner(network: string, privateKey: Hex): SignerWallet<Chain> {
+export function createSigner(
+  network: string,
+  privateKey: Hex,
+  rpcUrl?: string,
+): SignerWallet<Chain> {
   const chain = getChainFromNetwork(network);
 
   const walletClient = createWalletClient({
     chain,
-    transport: http(),
+    transport: http(rpcUrl, {
+      timeout: 30_000, // 30 second timeout for production reliability
+      retryCount: 3, // Retry failed requests up to 3 times
+      retryDelay: 1000, // 1 second delay between retries
+    }),
     account: privateKeyToAccount(privateKey),
   });
 
