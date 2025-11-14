@@ -1,7 +1,7 @@
 import axios from "axios";
 import { base, baseSepolia } from "viem/chains";
 import { withPaymentInterceptor } from "x402-axios";
-import { PaymentRequirements } from "x402/types";
+import { PaymentRequirements } from "@secured-finance/sf-x402/types";
 import { budgetStore } from "../stores/budget";
 import { operationStore, SettlementInfo } from "../stores/operations";
 import { getBlockExplorerUrl, formatUSDC } from "./chainConfig";

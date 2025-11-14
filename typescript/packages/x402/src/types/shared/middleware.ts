@@ -60,6 +60,8 @@ export type Price = Money | ERC20TokenAmount | SPLTokenAmount;
 export interface RouteConfig {
   price: Price;
   network: Network;
+  /** Optional: Specify which token to accept (e.g., "USDC", "JPYC", "USDFC"). If not specified, all available tokens on the network will be offered. */
+  token?: "USDC" | "JPYC" | "USDFC";
   config?: PaymentMiddlewareConfig;
 }
 

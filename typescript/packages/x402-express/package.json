@@ -1,9 +1,9 @@
 {
-  "name": "x402-express",
-  "version": "0.7.1",
+  "name": "@secured-finance/sf-x402-express",
+  "version": "0.0.1",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/cjs/index.d.ts",
   "scripts": {
     "start": "tsx --env-file=.env index.ts",
     "test": "vitest run",
@@ -15,10 +15,14 @@
     "lint": "eslint . --ext .ts --fix",
     "lint:check": "eslint . --ext .ts"
   },
+  "publishConfig": {
+    "access": "restricted",
+    "registry": "https://npm.pkg.github.com"
+  },
   "keywords": [],
   "license": "Apache-2.0",
-  "author": "Coinbase Inc.",
-  "repository": "https://github.com/coinbase/x402",
+  "author": "Secured Finance",
+  "repository": "https://github.com/Secured-Finance/x402",
   "description": "x402 Payment Protocol",
   "devDependencies": {
     "@eslint/js": "^9.24.0",
@@ -43,7 +47,7 @@
     "@coinbase/cdp-sdk": "^1.22.0",
     "express": "^4.18.2",
     "viem": "^2.21.26",
-    "x402": "workspace:^",
+    "@secured-finance/sf-x402": "workspace:^",
     "zod": "^3.24.2"
   },
   "exports": {

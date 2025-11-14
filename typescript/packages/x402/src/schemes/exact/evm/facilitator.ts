@@ -1,12 +1,22 @@
-import { Account, Address, Chain, getAddress, Hex, parseErc6492Signature, Transport } from "viem";
+import {
+  Account,
+  Address,
+  Chain,
+  getAddress,
+  Hex,
+  parseErc6492Signature,
+  Transport,
+  verifyTypedData,
+} from "viem";
 import { getNetworkId } from "../../../shared";
 import { getVersion, getERC20Balance } from "../../../shared/evm";
 import {
   usdcABI as abi,
   authorizationTypes,
-  config,
   ConnectedClient,
   SignerWallet,
+  feeReceiverABI,
+  createConnectedClient,
 } from "../../../types/shared/evm";
 import {
   PaymentPayload,
@@ -15,7 +25,8 @@ import {
   VerifyResponse,
   ExactEvmPayload,
 } from "../../../types/verify";
-import { SCHEME } from "../../exact";
+import { SCHEME } from "..";
+import { X402Config } from "../../../types";
 
 /**
  * Verifies a payment payload against the required payment details
@@ -31,6 +42,7 @@ import { SCHEME } from "../../exact";
  * @param client - The public client used for blockchain interactions
  * @param payload - The signed payment payload containing transfer parameters and signature
  * @param paymentRequirements - The payment requirements that the payload must satisfy
+ * @param config - X402Config
  * @returns A ValidPaymentRequest indicating if the payment is valid and any invalidation reason
  */
 export async function verify<
@@ -41,6 +53,7 @@ export async function verify<
   client: ConnectedClient<transport, chain, account>,
   payload: PaymentPayload,
   paymentRequirements: PaymentRequirements,
+  config?: X402Config,
 ): Promise<VerifyResponse> {
   /* TODO: work with security team on brainstorming more verification steps
   verification steps:
@@ -56,6 +69,17 @@ export async function verify<
     */
 
   const exactEvmPayload = payload.payload as ExactEvmPayload;
+  // ✅ Use custom RPC URL if provided via config
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let clientToUse: any = client;
+  try {
+    const rpcUrl = config?.evmConfig?.rpcUrls?.[payload.network];
+    if (rpcUrl) {
+      clientToUse = createConnectedClient(payload.network, rpcUrl);
+    }
+  } catch (e) {
+    console.warn("Falling back to default client (invalid custom RPC)", e);
+  }
 
   // Verify payload version
   if (payload.scheme !== SCHEME || paymentRequirements.scheme !== SCHEME) {
@@ -72,10 +96,17 @@ export async function verify<
   let version: string;
   try {
     chainId = getNetworkId(payload.network);
-    name = paymentRequirements.extra?.name ?? config[chainId.toString()].usdcName;
     erc20Address = paymentRequirements.asset as Address;
-    version = paymentRequirements.extra?.version ?? (await getVersion(client));
-  } catch {
+
+    // Use the token name from payment requirements (e.g., "JPYC", "USDC", "USDFC")
+    if (!paymentRequirements.extra?.name) {
+      throw new Error("Token name not found in payment requirements");
+    }
+    name = paymentRequirements.extra.name;
+
+    version = paymentRequirements.extra?.version ?? (await getVersion(clientToUse));
+  } catch (e) {
+    console.error("ERROR in verification setup:", e);
     return {
       isValid: false,
       invalidReason: `invalid_network`,
@@ -83,9 +114,13 @@ export async function verify<
     };
   }
   // Verify permit signature is recoverable for the owner address
+  // Use ReceiveWithAuthorization for FeeReceiver contract, TransferWithAuthorization otherwise
+  const useFeeReceiver = paymentRequirements.extra?.useFeeReceiver === true;
+  const primaryType = useFeeReceiver ? "ReceiveWithAuthorization" : "TransferWithAuthorization";
+
   const permitTypedData = {
     types: authorizationTypes,
-    primaryType: "TransferWithAuthorization" as const,
+    primaryType: primaryType as "TransferWithAuthorization" | "ReceiveWithAuthorization",
     domain: {
       name,
       version,
@@ -101,15 +136,47 @@ export async function verify<
       nonce: exactEvmPayload.authorization.nonce,
     },
   };
-  const recoveredAddress = await client.verifyTypedData({
-    address: exactEvmPayload.authorization.from as Address,
-    ...permitTypedData,
-    signature: exactEvmPayload.signature as Hex,
-  });
-  if (!recoveredAddress) {
+
+  let isValidSignature;
+  try {
+    const { signature } = parseErc6492Signature(exactEvmPayload.signature as Hex);
+    isValidSignature = await verifyTypedData({
+      address: exactEvmPayload.authorization.from as Address,
+      ...permitTypedData,
+      signature: signature,
+    });
+  } catch (e) {
+    console.error("ERROR verifying typed data:", e);
     return {
       isValid: false,
-      invalidReason: "invalid_exact_evm_payload_signature", //"Invalid permit signature",
+      invalidReason: "invalid_exact_evm_payload_signature",
+      payer: exactEvmPayload.authorization.from,
+    };
+  }
+
+  if (!isValidSignature) {
+    return {
+      isValid: false,
+      invalidReason: "invalid_exact_evm_payload_signature",
+      payer: exactEvmPayload.authorization.from,
+    };
+  }
+
+  // Verify nonce has not already been used (replay protection)
+  const authState = await client.readContract({
+    address: erc20Address,
+    abi,
+    functionName: "authorizationState",
+    args: [
+      exactEvmPayload.authorization.from as Address,
+      exactEvmPayload.authorization.nonce as Hex,
+    ],
+  });
+
+  if (authState === true) {
+    return {
+      isValid: false,
+      invalidReason: "nonce_already_used",
       payer: exactEvmPayload.authorization.from,
     };
   }
@@ -144,7 +211,7 @@ export async function verify<
   }
   // Verify client has enough funds to cover paymentRequirements.maxAmountRequired
   const balance = await getERC20Balance(
-    client,
+    clientToUse,
     erc20Address,
     exactEvmPayload.authorization.from as Address,
   );
@@ -179,17 +246,19 @@ export async function verify<
  * @param wallet - The facilitator wallet that will submit the transaction
  * @param paymentPayload - The signed payment payload containing the transfer parameters and signature
  * @param paymentRequirements - The original payment details that were used to create the payload
+ * @param config - X402 config
  * @returns A PaymentExecutionResponse containing the transaction status and hash
  */
 export async function settle<transport extends Transport, chain extends Chain>(
   wallet: SignerWallet<chain, transport>,
   paymentPayload: PaymentPayload,
   paymentRequirements: PaymentRequirements,
+  config?: X402Config,
 ): Promise<SettleResponse> {
   const payload = paymentPayload.payload as ExactEvmPayload;
 
   // re-verify to ensure the payment is still valid
-  const valid = await verify(wallet, paymentPayload, paymentRequirements);
+  const valid = await verify(wallet, paymentPayload, paymentRequirements, config);
 
   if (!valid.isValid) {
     return {
@@ -204,21 +273,63 @@ export async function settle<transport extends Transport, chain extends Chain>(
   // Returns the original signature (no-op) if the signature is not a 6492 signature
   const { signature } = parseErc6492Signature(payload.signature as Hex);
 
-  const tx = await wallet.writeContract({
-    address: paymentRequirements.asset as Address,
-    abi,
-    functionName: "transferWithAuthorization" as const,
-    args: [
-      payload.authorization.from as Address,
-      payload.authorization.to as Address,
-      BigInt(payload.authorization.value),
-      BigInt(payload.authorization.validAfter),
-      BigInt(payload.authorization.validBefore),
-      payload.authorization.nonce as Hex,
-      signature,
-    ],
-    chain: wallet.chain as Chain,
-  });
+  // Check if we're using the FeeReceiver contract
+  const useFeeReceiver = paymentRequirements.extra?.useFeeReceiver === true;
+
+  let tx: `0x${string}`;
+
+  if (useFeeReceiver) {
+    // Extract merchant info and fee from payment requirements
+    const merchant = paymentRequirements.extra?.merchant as Address;
+    const totalAmount = BigInt(payload.authorization.value);
+
+    if (!merchant) {
+      throw new Error("Merchant address not found in payment requirements");
+    }
+
+    // Split signature into v, r, s components
+    const sig = signature.slice(2); // Remove 0x prefix
+    const r = `0x${sig.slice(0, 64)}` as Hex;
+    const s = `0x${sig.slice(64, 128)}` as Hex;
+    const v = parseInt(sig.slice(128, 130), 16);
+
+    // Call FeeReceiver contract's settleWithAuthorization
+    tx = await wallet.writeContract({
+      address: paymentRequirements.payTo as Address, // This is the FeeReceiver contract address
+      abi: feeReceiverABI,
+      functionName: "settleWithAuthorization",
+      args: [
+        paymentRequirements.asset as Address, // token
+        payload.authorization.from as Address, // payer
+        merchant, // merchant
+        totalAmount, // totalAmount
+        BigInt(payload.authorization.validAfter), // validAfter
+        BigInt(payload.authorization.validBefore), // validBefore
+        payload.authorization.nonce as Hex, // nonce
+        v, // v
+        r, // r
+        s, // s
+      ],
+      chain: wallet.chain as Chain,
+    });
+  } else {
+    // Original flow: direct transferWithAuthorization
+    tx = await wallet.writeContract({
+      address: paymentRequirements.asset as Address,
+      abi,
+      functionName: "transferWithAuthorization" as const,
+      args: [
+        payload.authorization.from as Address,
+        payload.authorization.to as Address,
+        BigInt(payload.authorization.value),
+        BigInt(payload.authorization.validAfter),
+        BigInt(payload.authorization.validBefore),
+        payload.authorization.nonce as Hex,
+        signature,
+      ],
+      chain: wallet.chain as Chain,
+    });
+  }
 
   const receipt = await wallet.waitForTransactionReceipt({ hash: tx });
 

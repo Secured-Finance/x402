@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { exact } from "x402/schemes";
-import { findMatchingRoute, findMatchingPaymentRequirements } from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
+import { exact } from "@secured-finance/sf-x402/schemes";
+import {
+  findMatchingRoute,
+  findMatchingPaymentRequirements,
+} from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
 import {
   FacilitatorConfig,
   Network,
@@ -10,9 +13,9 @@ import {
   PaymentPayload,
   PaymentRequirements,
   RouteConfig,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 import type { Address as SolanaAddress } from "@solana/kit";
-import { useFacilitator } from "x402/verify";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
 import { paymentMiddleware } from "./index";
 
 // Mock dependencies

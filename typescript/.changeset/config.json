@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/@changesets/config@2.3.0/schema.json",
+  "changelog": "@changesets/cli/changelog",
+  "commit": false,
+  "access": "public",
+  "baseBranch": "main",
+  "updateInternalDependencies": "patch",
+  "ignore": [
+    "@secured-finance/sf-x402-cdp",
+    "@secured-finance/sf-x402-axios",
+    "@secured-finance/sf-x402-fetch",
+    "@secured-finance/sf-x402-hono",
+    "@secured-finance/sf-x402-next",
+    "site"
+  ]
+}
