@@ -10,6 +10,8 @@ const EvmAddressRegex = /^0x[0-9a-fA-F]{40}$/;
 const MixedAddressRegex = /^0x[a-fA-F0-9]{40}|[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$/;
 const HexEncoded64ByteRegex = /^0x[0-9a-fA-F]{64}$/;
 const EvmSignatureRegex = /^0x[0-9a-fA-F]+$/; // Flexible hex signature validation
+// Transaction hash regex for both EVM (0x + 64 hex chars) and Solana (base58, typically 87-88 chars)
+const TransactionHashRegex = /^0x[0-9a-fA-F]{64}$|^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
 // Enums
 export const schemes = ["exact"] as const;
 export const x402Versions = [1] as const;
@@ -205,7 +207,7 @@ export const SettleResponseSchema = z.object({
   success: z.boolean(),
   errorReason: z.enum(ErrorReasons).optional(),
   payer: EvmOrSvmAddress.optional(),
-  transaction: z.string().regex(MixedAddressRegex),
+  transaction: z.string().regex(TransactionHashRegex),
   network: NetworkSchema,
 });
 export type SettleResponse = z.infer<typeof SettleResponseSchema>;
