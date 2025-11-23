@@ -34,24 +34,8 @@ import {
   calculateFee,
   DEFAULT_PAYMENT_TIMEOUT_SECONDS,
   X402_VERSION,
+  usdToAtomic,
 } from "@secured-finance/sf-x402";
-
-/**
- * Converts a USD amount to atomic units
- *
- * @param usdAmount - The USD amount to convert
- * @param decimals - The number of decimals for the token
- * @returns The atomic units
- */
-function usdToAtomic(usdAmount: number, decimals: number): string {
-  const parts = usdAmount.toString().split(".");
-  const dollars = parts[0];
-  const cents = parts[1] ?? "";
-
-  const padded = cents.padEnd(decimals, "0").slice(0, decimals);
-  const atomic = dollars + padded;
-  return BigInt(atomic).toString();
-}
 
 /**
  * Creates a payment middleware factory for Express
@@ -168,7 +152,7 @@ export function paymentMiddleware(
 
         // Calculate facilitator fee using shared constants
         const totalAmount = BigInt(maxAmountRequired);
-        const { feeAmount, merchantAmount } = calculateFee(totalAmount);
+        const { feeAmount, merchantAmount } = calculateFee(totalAmount, asset.decimals);
 
         // Determine who receives the payment
         const actualPayTo = chainConfig?.feeReceiverAddress
@@ -370,12 +354,31 @@ export function paymentMiddleware(
       return res; // maintain correct return type
     };
 
+    // Create settlement promise and attach to request for route handlers to access
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let settlementResolve!: (value: any) => void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let settlementReject!: (error: any) => void;
+    const settlementPromise = new Promise((resolve, reject) => {
+      settlementResolve = resolve;
+      settlementReject = reject;
+    });
+
+    // Attach settlement promise to request so route handlers can await it
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (req as any).payment = {
+      settlement: {
+        promise: settlementPromise,
+      },
+    };
+
     // Proceed to the next middleware or route handler
     await next();
 
     // If the response from the protected route is >= 400, do not settle payment
     if (res.statusCode >= 400) {
       res.end = originalEnd;
+      settlementReject(new Error("Route returned error status"));
       if (endArgs) {
         originalEnd(...(endArgs as Parameters<typeof res.end>));
       }
@@ -383,12 +386,22 @@ export function paymentMiddleware(
     }
 
     try {
+      console.log("[MIDDLEWARE] Starting settlement...");
       const settleResponse = await settle(decodedPayment, selectedPaymentRequirements);
+      console.log("[MIDDLEWARE] Settlement response received:", {
+        success: settleResponse.success,
+        transaction: settleResponse.transaction,
+        network: settleResponse.network,
+      });
+
       const responseHeader = settleResponseHeader(settleResponse);
       res.setHeader("X-PAYMENT-RESPONSE", responseHeader);
+      console.log("[MIDDLEWARE] Set X-PAYMENT-RESPONSE header");
 
       // if the settle fails, return an error
       if (!settleResponse.success) {
+        console.log("[MIDDLEWARE] Settlement failed, returning 402");
+        settlementReject(new Error(settleResponse.errorReason || "Settlement failed"));
         res.status(402).json({
           x402Version: X402_VERSION,
           error: settleResponse.errorReason,
@@ -400,13 +413,21 @@ export function paymentMiddleware(
       // Add transaction hash and explorer URL to response headers for successful payments
       if (settleResponse.transaction) {
         res.setHeader("X-PAYMENT-TX-HASH", settleResponse.transaction);
+        console.log("[MIDDLEWARE] Set X-PAYMENT-TX-HASH:", settleResponse.transaction);
         const explorerUrl = getExplorerUrl(settleResponse.network, settleResponse.transaction);
         if (explorerUrl) {
           res.setHeader("X-PAYMENT-TX-EXPLORER", explorerUrl);
+          console.log("[MIDDLEWARE] Set X-PAYMENT-TX-EXPLORER:", explorerUrl);
         }
+      } else {
+        console.log("[MIDDLEWARE] WARNING: No transaction hash in settlement response!");
       }
+
+      // Resolve settlement promise with full response
+      settlementResolve(settleResponse);
     } catch (error) {
       console.error(error);
+      settlementReject(error);
       // If settlement fails and the response hasn't been sent yet, return an error
       if (!res.headersSent) {
         res.status(402).json({
