@@ -14,6 +14,7 @@ import { RoutesConfig } from "../types";
 import { safeBase64Decode } from "./base64";
 import { getUsdcChainConfigForChain } from "./evm";
 import { getNetworkId } from "./network";
+import { usdToAtomic } from "../constants";
 
 /**
  * Computes the route patterns for the given routes config
@@ -237,7 +238,7 @@ export function processPriceToAtomicAmount(
     }
     const parsedUsdAmount = parsedAmount.data;
     asset = getDefaultAsset(network);
-    maxAmountRequired = (parsedUsdAmount * 10 ** asset.decimals).toString();
+    maxAmountRequired = usdToAtomic(parsedUsdAmount, asset.decimals);
   } else {
     // Token amount in atomic units
     maxAmountRequired = price.amount;

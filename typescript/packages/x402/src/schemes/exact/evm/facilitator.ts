@@ -191,9 +191,9 @@ export async function verify<
   }
 
   // Verify deadline is not yet expired
-  // Pad 3 block to account for round tripping
+  // Pad 1 block to account for round tripping (reduced from 6s to 2s to avoid false failures)
   if (
-    BigInt(exactEvmPayload.authorization.validBefore) < BigInt(Math.floor(Date.now() / 1000) + 6)
+    BigInt(exactEvmPayload.authorization.validBefore) < BigInt(Math.floor(Date.now() / 1000) + 2)
   ) {
     return {
       isValid: false,
