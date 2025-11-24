@@ -41,7 +41,7 @@ export const config: Record<string, ChainConfig> = {
     usdcName: "USDC",
     jpycAddress: "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
     jpycName: "JPY Coin",
-    feeReceiverAddress: "0x0d06F661a4fCB8CF357dCc40b0938eD1f6aC7172", // ✅ Deployed
+    feeReceiverAddress: "0x8F35dfEC24944b5f87A97D38402dfA9117110d77", // ✅ Deployed
     blockExplorer: "https://sepolia.etherscan.io",
   },
   // Ethereum Mainnet - FeeReceiver not yet deployed
@@ -124,7 +124,7 @@ export const config: Record<string, ChainConfig> = {
   "314159": {
     usdfcAddress: "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
     usdfcName: "USD for Filecoin Community",
-    feeReceiverAddress: "0x34a6A7D8d7f8C9F2369b7404904DA943C519Ab13", // ✅ Deployed
+    feeReceiverAddress: "0x0f7A0E7942d1b7a60921Ec99E655402Bd014FDC2", // ✅ Deployed
     blockExplorer: "https://filecoin.blockscout.com",
   },
 };
@@ -149,15 +149,15 @@ export type ChainConfig = {
 
 export function getExplorerUrl(network: Network, txHash: string): string {
   const NETWORK_TO_CHAIN_ID: Record<string, string> = {
-    "sepolia": "11155111",
-    "mainnet": "1",
-    "base": "8453",
+    sepolia: "11155111",
+    mainnet: "1",
+    base: "8453",
     "base-sepolia": "84532",
-    "polygon": "137",
+    polygon: "137",
     "polygon-amoy": "80002",
-    "avalanche": "43114",
+    avalanche: "43114",
     "avalanche-fuji": "43113",
-    "filecoin": "314",
+    filecoin: "314",
     "filecoin-calibration": "314159",
   };
 
