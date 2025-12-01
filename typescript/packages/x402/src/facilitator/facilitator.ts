@@ -45,6 +45,7 @@ export async function verify<
         client as EvmConnectedClient<transport, chain, account>,
         payload,
         paymentRequirements,
+        config,
       );
     }
 
@@ -93,6 +94,7 @@ export async function settle<transport extends Transport, chain extends Chain>(
         client as EvmSignerWallet<chain, transport>,
         payload,
         paymentRequirements,
+        config,
       );
     }
 

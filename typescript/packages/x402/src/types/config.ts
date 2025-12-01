@@ -8,6 +8,9 @@ export interface SvmConfig {
    */
   rpcUrl?: string;
 }
+export interface EvmConfig {
+  rpcUrls?: Record<string, string>; // network name -> RPC URL mapping
+}
 
 /**
  * Configuration options for X402 client and facilitator operations.
@@ -15,5 +18,6 @@ export interface SvmConfig {
 export interface X402Config {
   /** Configuration for Solana (SVM) operations */
   svmConfig?: SvmConfig;
+  evmConfig?: EvmConfig;
   // Future: evmConfig?: EvmConfig for EVM-specific configurations
 }

@@ -61,13 +61,22 @@ h6 {
   font-family: "Inter", system-ui, -apple-system, sans-serif;
 }
 
-.ock-bg-secondary, .ock-bg-default {
-  background-color: var(--details-background-color);
-  transition: background-color 150ms;
+/* OnchainKit button overrides */
+button.ock-bg-secondary,
+button.ock-bg-default,
+.ock-bg-secondary,
+.ock-bg-default {
+  background-color: #0f1724 !important;
+  color: #f8fafc !important;
+  transition: background-color 0.15s !important;
 }
 
-.ock-bg-secondary:hover {
-  background-color: var(--details-background-color-hover);
+button.ock-bg-secondary:hover,
+button.ock-bg-default:hover,
+.ock-bg-secondary:hover,
+.ock-bg-default:hover {
+  background-color: #1a2332 !important;
+  color: #f8fafc !important;
 }
 
 .opacity-80 {

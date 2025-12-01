@@ -18,8 +18,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "viem": "^2.21.26",
-    "x402-next": "workspace:*",
-    "@coinbase/x402": "workspace:*"
+    "@secured-finance/sf-x402-next": "workspace:*",
+    "@secured-finance/sf-x402-cdp": "workspace:*"
   },
   "devDependencies": {
     "@svgr/webpack": "^8.1.0",

@@ -2,15 +2,18 @@ import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { Address, getAddress } from "viem";
 import type { Address as SolanaAddress } from "@solana/kit";
-import { exact } from "x402/schemes";
+import { exact } from "@secured-finance/sf-x402/schemes";
 import {
   computeRoutePatterns,
   findMatchingPaymentRequirements,
   findMatchingRoute,
+  getAllAssetsForNetwork,
   processPriceToAtomicAmount,
   toJsonSafe,
-} from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
+} from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
+import type { Network } from "@secured-finance/sf-x402/types";
+import { isTestnetNetwork } from "@secured-finance/sf-x402/types";
 import {
   FacilitatorConfig,
   moneySchema,
@@ -22,9 +25,10 @@ import {
   ERC20TokenAmount,
   SupportedEVMNetworks,
   SupportedSVMNetworks,
-} from "x402/types";
-import { useFacilitator } from "x402/verify";
-import { safeBase64Encode } from "x402/shared";
+} from "@secured-finance/sf-x402/types";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
+import { safeBase64Encode } from "@secured-finance/sf-x402/shared";
+import { usdToAtomic } from "@secured-finance/sf-x402";
 
 import { POST } from "./api/session-token";
 
@@ -39,12 +43,12 @@ import { POST } from "./api/session-token";
  *
  * @example
  * ```typescript
- * // Simple configuration - All endpoints are protected by $0.01 of USDC on base-sepolia
+ * // Simple configuration - All endpoints are protected by $0.01 of USDC on sepolia
  * export const middleware = paymentMiddleware(
  *   '0x123...', // payTo address
  *   {
  *     price: '$0.01', // USDC amount in dollars
- *     network: 'base-sepolia'
+ *     network: 'sepolia'
  *   },
  *   // Optional facilitator configuration. Defaults to x402.org/facilitator for testnet usage
  * );
@@ -113,7 +117,7 @@ export function paymentMiddleware(
       return NextResponse.next();
     }
 
-    const { price, network, config = {} } = matchingRoute.config;
+    const { price, network, token, config = {} } = matchingRoute.config;
     const {
       description,
       mimeType,
@@ -126,42 +130,58 @@ export function paymentMiddleware(
       discoverable,
     } = config;
 
-    const atomicAmountForAsset = processPriceToAtomicAmount(price, network);
-    if ("error" in atomicAmountForAsset) {
-      return new NextResponse(atomicAmountForAsset.error, { status: 500 });
-    }
-    const { maxAmountRequired, asset } = atomicAmountForAsset;
-
     const resourceUrl =
       resource || (`${request.nextUrl.protocol}//${request.nextUrl.host}${pathname}` as Resource);
 
     let paymentRequirements: PaymentRequirements[] = [];
 
-    // TODO: create a shared middleware function to build payment requirements
     // evm networks
     if (SupportedEVMNetworks.includes(network)) {
-      paymentRequirements.push({
-        scheme: "exact",
-        network,
-        maxAmountRequired,
-        resource: resourceUrl,
-        description: description ?? "",
-        mimeType: mimeType ?? "application/json",
-        payTo: getAddress(payTo),
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
-        asset: getAddress(asset.address),
-        // TODO: Rename outputSchema to requestStructure
-        outputSchema: {
-          input: {
-            type: "http",
-            method,
-            discoverable: discoverable ?? true,
-            ...inputSchema,
+      // Get all available tokens for this network, filtered by token if specified
+      const allAssets = getAllAssetsForNetwork(network, token);
+
+      // Create a payment requirement for EACH available token
+      for (const asset of allAssets) {
+        // Parse the price for this specific asset
+        let maxAmountRequired: string;
+        if (typeof price === "string" || typeof price === "number") {
+          // Price is in USD, convert to atomic units for this asset
+          const parsedAmount = moneySchema.safeParse(price);
+          if (!parsedAmount.success) {
+            return new NextResponse(
+              `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
+              { status: 500 }
+            );
+          }
+          const parsedUsdAmount = parsedAmount.data;
+          maxAmountRequired = usdToAtomic(parsedUsdAmount, asset.decimals);
+        } else {
+          // Price is already in atomic units with specific asset
+          maxAmountRequired = price.amount;
+        }
+
+        paymentRequirements.push({
+          scheme: "exact",
+          network,
+          maxAmountRequired,
+          resource: resourceUrl,
+          description: description ?? "",
+          mimeType: mimeType ?? "application/json",
+          payTo: getAddress(payTo),
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
+          asset: getAddress(asset.address),
+          outputSchema: {
+            input: {
+              type: "http",
+              method,
+              discoverable: discoverable ?? true,
+              ...inputSchema,
+            },
+            output: outputSchema,
           },
-          output: outputSchema,
-        },
-        extra: (asset as ERC20TokenAmount["asset"]).eip712,
-      });
+          extra: (asset as ERC20TokenAmount["asset"]).eip712,
+        });
+      }
     }
     // svm networks
     else if (SupportedSVMNetworks.includes(network)) {
@@ -182,17 +202,40 @@ export function paymentMiddleware(
         throw new Error(`The facilitator did not provide a fee payer for network: ${network}.`);
       }
 
-      // build the payment requirements for svm
-      paymentRequirements.push({
-        scheme: "exact",
-        network,
-        maxAmountRequired,
-        resource: resourceUrl,
-        description: description ?? "",
-        mimeType: mimeType ?? "",
-        payTo: payTo,
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
-        asset: asset.address,
+      // Get all available tokens for Solana, filtered by token if specified
+      const allAssets = getAllAssetsForNetwork(network, token);
+
+      // Create a payment requirement for EACH available token
+      for (const asset of allAssets) {
+        // Parse the price for this specific asset
+        let maxAmountRequired: string;
+        if (typeof price === "string" || typeof price === "number") {
+          // Price is in USD, convert to atomic units for this asset
+          const parsedAmount = moneySchema.safeParse(price);
+          if (!parsedAmount.success) {
+            return new NextResponse(
+              `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
+              { status: 500 }
+            );
+          }
+          const parsedUsdAmount = parsedAmount.data;
+          maxAmountRequired = usdToAtomic(parsedUsdAmount, asset.decimals);
+        } else {
+          // Price is already in atomic units with specific asset
+          maxAmountRequired = price.amount;
+        }
+
+        // build the payment requirements for svm
+        paymentRequirements.push({
+          scheme: "exact",
+          network,
+          maxAmountRequired,
+          resource: resourceUrl,
+          description: description ?? "",
+          mimeType: mimeType ?? "",
+          payTo: payTo,
+          maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
+          asset: asset.address,
         // TODO: Rename outputSchema to requestStructure
         outputSchema: {
           input: {
@@ -207,6 +250,7 @@ export function paymentMiddleware(
           feePayer,
         },
       });
+      }
     } else {
       throw new Error(`Unsupported network: ${network}`);
     }
@@ -239,7 +283,7 @@ export function paymentMiddleware(
                 typeof getPaywallHtml
               >[0]["paymentRequirements"],
               currentUrl: request.url,
-              testnet: network === "base-sepolia",
+              testnet: isTestnetNetwork(network as Network),
               cdpClientKey: paywall?.cdpClientKey,
               appLogo: paywall?.appLogo,
               appName: paywall?.appName,
@@ -358,7 +402,7 @@ export type {
   Resource,
   RouteConfig,
   RoutesConfig,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 export type { Address as SolanaAddress } from "@solana/kit";
 
 // Export session token API handlers for Onramp

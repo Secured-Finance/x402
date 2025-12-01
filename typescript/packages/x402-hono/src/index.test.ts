@@ -1,8 +1,11 @@
 import { Context } from "hono";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { exact } from "x402/schemes";
-import { findMatchingRoute, findMatchingPaymentRequirements } from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
+import { exact } from "@secured-finance/sf-x402/schemes";
+import {
+  findMatchingRoute,
+  findMatchingPaymentRequirements,
+} from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
 import {
   FacilitatorConfig,
   Network,
@@ -10,8 +13,8 @@ import {
   PaymentPayload,
   RouteConfig,
   RoutesConfig,
-} from "x402/types";
-import { useFacilitator } from "x402/verify";
+} from "@secured-finance/sf-x402/types";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
 import { paymentMiddleware } from "./index";
 import { Address as SolanaAddress } from "@solana/kit";
 

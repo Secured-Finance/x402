@@ -1,15 +1,19 @@
 import { NextFunction, Request, Response } from "express";
 import { Address, getAddress } from "viem";
 import { Address as SolanaAddress } from "@solana/kit";
-import { exact } from "x402/schemes";
+import { exact } from "@secured-finance/sf-x402/schemes";
 import {
   computeRoutePatterns,
   findMatchingPaymentRequirements,
   findMatchingRoute,
   processPriceToAtomicAmount,
   toJsonSafe,
-} from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
+  getNetworkId,
+  getUsdcChainConfigForChain,
+  getAllAssetsForNetwork,
+  getExplorerUrl,
+} from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
 import {
   FacilitatorConfig,
   ERC20TokenAmount,
@@ -22,8 +26,16 @@ import {
   settleResponseHeader,
   SupportedEVMNetworks,
   SupportedSVMNetworks,
-} from "x402/types";
-import { useFacilitator } from "x402/verify";
+  Network,
+  isTestnetNetwork,
+} from "@secured-finance/sf-x402/types";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
+import {
+  calculateFee,
+  DEFAULT_PAYMENT_TIMEOUT_SECONDS,
+  X402_VERSION,
+  usdToAtomic,
+} from "@secured-finance/sf-x402";
 
 /**
  * Creates a payment middleware factory for Express
@@ -36,12 +48,12 @@ import { useFacilitator } from "x402/verify";
  *
  * @example
  * ```typescript
- * // Simple configuration - All endpoints are protected by $0.01 of USDC on base-sepolia
+ * // Simple configuration - All endpoints are protected by $0.01 of USDC on sepolia
  * app.use(paymentMiddleware(
  *   '0x123...', // payTo address
  *   {
  *     price: '$0.01', // USDC amount in dollars
- *     network: 'base-sepolia'
+ *     network: 'sepolia'
  *   },
  *   // Optional facilitator configuration. Defaults to x402.org/facilitator for testnet usage
  * ));
@@ -79,7 +91,6 @@ export function paymentMiddleware(
   paywall?: PaywallConfig,
 ) {
   const { verify, settle, supported } = useFacilitator(facilitator);
-  const x402Version = 1;
 
   // Pre-compile route patterns to regex and extract verbs
   const routePatterns = computeRoutePatterns(routes);
@@ -95,7 +106,7 @@ export function paymentMiddleware(
       return next();
     }
 
-    const { price, network, config = {} } = matchingRoute.config;
+    const { price, network, token, config = {} } = matchingRoute.config;
     const {
       description,
       mimeType,
@@ -107,42 +118,77 @@ export function paymentMiddleware(
       discoverable,
     } = config;
 
-    const atomicAmountForAsset = processPriceToAtomicAmount(price, network);
-    if ("error" in atomicAmountForAsset) {
-      throw new Error(atomicAmountForAsset.error);
-    }
-    const { maxAmountRequired, asset } = atomicAmountForAsset;
-
     const resourceUrl: Resource =
       resource || (`${req.protocol}://${req.headers.host}${req.path}` as Resource);
 
     let paymentRequirements: PaymentRequirements[] = [];
 
-    // TODO: create a shared middleware function to build payment requirements
     // evm networks
     if (SupportedEVMNetworks.includes(network)) {
-      paymentRequirements.push({
-        scheme: "exact",
-        network,
-        maxAmountRequired,
-        resource: resourceUrl,
-        description: description ?? "",
-        mimeType: mimeType ?? "",
-        payTo: getAddress(payTo),
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
-        asset: getAddress(asset.address),
-        // TODO: Rename outputSchema to requestStructure
-        outputSchema: {
-          input: {
-            type: "http",
-            method: req.method.toUpperCase(),
-            discoverable: discoverable ?? true,
-            ...inputSchema,
+      const chainId = getNetworkId(network);
+      const chainConfig = getUsdcChainConfigForChain(chainId);
+
+      // Get all available tokens for this network, filtered by token if specified
+      const allAssets = getAllAssetsForNetwork(network, token);
+
+      // Create a payment requirement for EACH available token
+      for (const asset of allAssets) {
+        // Parse the price for this specific asset
+        let maxAmountRequired: string;
+        if (typeof price === "string" || typeof price === "number") {
+          // Price is in USD, convert to atomic units for this asset
+          const parsedAmount = moneySchema.safeParse(price);
+          if (!parsedAmount.success) {
+            throw new Error(
+              `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
+            );
+          }
+          const parsedUsdAmount = parsedAmount.data;
+          maxAmountRequired = usdToAtomic(parsedUsdAmount, asset.decimals);
+        } else {
+          // Price is already in atomic units with specific asset
+          maxAmountRequired = price.amount;
+        }
+
+        // Calculate facilitator fee using shared constants
+        const totalAmount = BigInt(maxAmountRequired);
+        const { feeAmount, merchantAmount } = calculateFee(totalAmount, asset.decimals);
+
+        // Determine who receives the payment
+        const actualPayTo = chainConfig?.feeReceiverAddress
+          ? getAddress(chainConfig.feeReceiverAddress)
+          : getAddress(payTo);
+
+        paymentRequirements.push({
+          scheme: "exact",
+          network,
+          maxAmountRequired: totalAmount.toString(),
+          resource: resourceUrl,
+          description: description ?? "",
+          mimeType: mimeType ?? "",
+          payTo: actualPayTo,
+          maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
+          asset: getAddress(asset.address),
+          outputSchema: {
+            input: {
+              type: "http",
+              method: req.method.toUpperCase(),
+              discoverable: discoverable ?? true,
+              ...inputSchema,
+            },
+            output: outputSchema,
           },
-          output: outputSchema,
-        },
-        extra: (asset as ERC20TokenAmount["asset"]).eip712,
-      });
+          extra: {
+            ...(asset as ERC20TokenAmount["asset"]).eip712,
+            // Store merchant info and fee for settlement
+            merchant: getAddress(payTo),
+            merchantAmount: merchantAmount.toString(),
+            feeAmount: feeAmount.toString(),
+            useFeeReceiver: !!chainConfig?.feeReceiverAddress,
+            decimals: asset.decimals, // Include decimals for paywall to use
+          },
+        });
+      }
     }
 
     // svm networks
@@ -164,6 +210,13 @@ export function paymentMiddleware(
         throw new Error(`The facilitator did not provide a fee payer for network: ${network}.`);
       }
 
+      // Parse the price to get amount and asset
+      const atomicAmountForAsset = processPriceToAtomicAmount(price, network);
+      if ("error" in atomicAmountForAsset) {
+        throw new Error(atomicAmountForAsset.error);
+      }
+      const { maxAmountRequired, asset } = atomicAmountForAsset;
+
       paymentRequirements.push({
         scheme: "exact",
         network,
@@ -172,9 +225,8 @@ export function paymentMiddleware(
         description: description ?? "",
         mimeType: mimeType ?? "",
         payTo: payTo,
-        maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
+        maxTimeoutSeconds: maxTimeoutSeconds ?? DEFAULT_PAYMENT_TIMEOUT_SECONDS,
         asset: asset.address,
-        // TODO: Rename outputSchema to requestStructure
         outputSchema: {
           input: {
             type: "http",
@@ -198,7 +250,9 @@ export function paymentMiddleware(
     const isWebBrowser = acceptHeader.includes("text/html") && userAgent.includes("Mozilla");
 
     if (!payment) {
-      // TODO handle paywall html for solana
+      // NOTE: Solana paywall HTML generation is not yet implemented
+      // Currently falls back to JSON 402 response for Solana networks
+      // EVM networks (Ethereum, Base, Polygon, Filecoin) have full paywall HTML support
       if (isWebBrowser) {
         let displayAmount: number;
         if (typeof price === "string" || typeof price === "number") {
@@ -220,7 +274,7 @@ export function paymentMiddleware(
               typeof getPaywallHtml
             >[0]["paymentRequirements"],
             currentUrl: req.originalUrl,
-            testnet: network === "base-sepolia",
+            testnet: isTestnetNetwork(network as Network),
             cdpClientKey: paywall?.cdpClientKey,
             appName: paywall?.appName,
             appLogo: paywall?.appLogo,
@@ -230,7 +284,7 @@ export function paymentMiddleware(
         return;
       }
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: "X-PAYMENT header is required",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -240,11 +294,11 @@ export function paymentMiddleware(
     let decodedPayment: PaymentPayload;
     try {
       decodedPayment = exact.evm.decodePayment(payment);
-      decodedPayment.x402Version = x402Version;
+      decodedPayment.x402Version = X402_VERSION;
     } catch (error) {
       console.error(error);
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: error || "Invalid or malformed payment header",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -257,7 +311,7 @@ export function paymentMiddleware(
     );
     if (!selectedPaymentRequirements) {
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error: "Unable to find matching payment requirements",
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -268,7 +322,7 @@ export function paymentMiddleware(
       const response = await verify(decodedPayment, selectedPaymentRequirements);
       if (!response.isValid) {
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error: response.invalidReason,
           accepts: toJsonSafe(paymentRequirements),
           payer: response.payer,
@@ -278,7 +332,7 @@ export function paymentMiddleware(
     } catch (error) {
       console.error(error);
       res.status(402).json({
-        x402Version,
+        x402Version: X402_VERSION,
         error,
         accepts: toJsonSafe(paymentRequirements),
       });
@@ -300,12 +354,31 @@ export function paymentMiddleware(
       return res; // maintain correct return type
     };
 
+    // Create settlement promise and attach to request for route handlers to access
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let settlementResolve!: (value: any) => void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let settlementReject!: (error: any) => void;
+    const settlementPromise = new Promise((resolve, reject) => {
+      settlementResolve = resolve;
+      settlementReject = reject;
+    });
+
+    // Attach settlement promise to request so route handlers can await it
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (req as any).payment = {
+      settlement: {
+        promise: settlementPromise,
+      },
+    };
+
     // Proceed to the next middleware or route handler
     await next();
 
     // If the response from the protected route is >= 400, do not settle payment
     if (res.statusCode >= 400) {
       res.end = originalEnd;
+      settlementReject(new Error("Route returned error status"));
       if (endArgs) {
         originalEnd(...(endArgs as Parameters<typeof res.end>));
       }
@@ -313,25 +386,52 @@ export function paymentMiddleware(
     }
 
     try {
+      console.log("[MIDDLEWARE] Starting settlement...");
       const settleResponse = await settle(decodedPayment, selectedPaymentRequirements);
+      console.log("[MIDDLEWARE] Settlement response received:", {
+        success: settleResponse.success,
+        transaction: settleResponse.transaction,
+        network: settleResponse.network,
+      });
+
       const responseHeader = settleResponseHeader(settleResponse);
       res.setHeader("X-PAYMENT-RESPONSE", responseHeader);
+      console.log("[MIDDLEWARE] Set X-PAYMENT-RESPONSE header");
 
       // if the settle fails, return an error
       if (!settleResponse.success) {
+        console.log("[MIDDLEWARE] Settlement failed, returning 402");
+        settlementReject(new Error(settleResponse.errorReason || "Settlement failed"));
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error: settleResponse.errorReason,
           accepts: toJsonSafe(paymentRequirements),
         });
         return;
       }
+
+      // Add transaction hash and explorer URL to response headers for successful payments
+      if (settleResponse.transaction) {
+        res.setHeader("X-PAYMENT-TX-HASH", settleResponse.transaction);
+        console.log("[MIDDLEWARE] Set X-PAYMENT-TX-HASH:", settleResponse.transaction);
+        const explorerUrl = getExplorerUrl(settleResponse.network, settleResponse.transaction);
+        if (explorerUrl) {
+          res.setHeader("X-PAYMENT-TX-EXPLORER", explorerUrl);
+          console.log("[MIDDLEWARE] Set X-PAYMENT-TX-EXPLORER:", explorerUrl);
+        }
+      } else {
+        console.log("[MIDDLEWARE] WARNING: No transaction hash in settlement response!");
+      }
+
+      // Resolve settlement promise with full response
+      settlementResolve(settleResponse);
     } catch (error) {
       console.error(error);
+      settlementReject(error);
       // If settlement fails and the response hasn't been sent yet, return an error
       if (!res.headersSent) {
         res.status(402).json({
-          x402Version,
+          x402Version: X402_VERSION,
           error,
           accepts: toJsonSafe(paymentRequirements),
         });
@@ -353,5 +453,5 @@ export type {
   Resource,
   RouteConfig,
   RoutesConfig,
-} from "x402/types";
+} from "@secured-finance/sf-x402/types";
 export type { Address as SolanaAddress } from "@solana/kit";

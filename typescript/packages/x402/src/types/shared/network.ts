@@ -3,6 +3,7 @@ import { z } from "zod";
 export const NetworkSchema = z.enum([
   "abstract",
   "abstract-testnet",
+  "sepolia",
   "base-sepolia",
   "base",
   "avalanche-fuji",
@@ -16,6 +17,9 @@ export const NetworkSchema = z.enum([
   "polygon-amoy",
   "peaq",
   "story",
+  "mainnet",
+  "filecoin",
+  "filecoin-calibration",
 ]);
 export type Network = z.infer<typeof NetworkSchema>;
 
@@ -23,6 +27,7 @@ export type Network = z.infer<typeof NetworkSchema>;
 export const SupportedEVMNetworks: Network[] = [
   "abstract",
   "abstract-testnet",
+  "sepolia",
   "base-sepolia",
   "base",
   "avalanche-fuji",
@@ -34,10 +39,14 @@ export const SupportedEVMNetworks: Network[] = [
   "polygon-amoy",
   "peaq",
   "story",
+  "mainnet",
+  "filecoin",
+  "filecoin-calibration",
 ];
 export const EvmNetworkToChainId = new Map<Network, number>([
   ["abstract", 2741],
   ["abstract-testnet", 11124],
+  ["sepolia", 11155111],
   ["base-sepolia", 84532],
   ["base", 8453],
   ["avalanche-fuji", 43113],
@@ -49,6 +58,9 @@ export const EvmNetworkToChainId = new Map<Network, number>([
   ["polygon-amoy", 80002],
   ["peaq", 3338],
   ["story", 1514],
+  ["mainnet", 1],
+  ["filecoin", 314],
+  ["filecoin-calibration", 314159],
 ]);
 
 // svm
@@ -64,3 +76,19 @@ export const ChainIdToNetwork = Object.fromEntries(
     network,
   ]),
 ) as Record<number, Network>;
+
+// Runtime helper to determine testnet vs mainnet for both EVM and SVM networks
+const TESTNET_NETWORKS = new Set<Network>([
+  "abstract-testnet",
+  "sepolia",
+  "base-sepolia",
+  "avalanche-fuji",
+  "solana-devnet",
+  "sei-testnet",
+  "polygon-amoy",
+  "filecoin-calibration",
+]);
+
+export function isTestnetNetwork(network: Network): boolean {
+  return TESTNET_NETWORKS.has(network);
+}

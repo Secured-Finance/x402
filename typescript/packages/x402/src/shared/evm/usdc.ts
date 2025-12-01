@@ -92,3 +92,39 @@ export async function getUSDCBalance<
   });
   return balance as bigint;
 }
+
+/**
+ * Gets the primary stablecoin (USDC or USDFC) balance for a specific address based on chain config
+ */
+export async function getStablecoinBalance<
+  transport extends Transport,
+  chain extends Chain,
+  account extends Account | undefined = undefined,
+>(client: ConnectedClient<transport, chain, account>, address: Address): Promise<bigint> {
+  const chainId = client.chain!.id;
+  const chainConfig = getUsdcChainConfigForChain(chainId);
+  if (!chainConfig) return 0n;
+  const tokenAddress = (chainConfig.usdcAddress || chainConfig.usdfcAddress) as `0x${string}` | undefined;
+  if (!tokenAddress) return 0n;
+  const balance = await client.readContract({
+    address: tokenAddress,
+    abi,
+    functionName: "balanceOf",
+    args: [address],
+  });
+  return balance as bigint;
+}
+
+/**
+ * Returns the primary stablecoin symbol for the current chain (e.g., "USDC" or "USDFC")
+ */
+export function getStablecoinSymbol<
+  transport extends Transport,
+  chain extends Chain | undefined = undefined,
+  account extends Account | undefined = undefined,
+>(client: Client<transport, chain, account>): string | undefined {
+  const chainId = client.chain!.id;
+  const chainCfg = getUsdcChainConfigForChain(chainId);
+  if (!chainCfg) return undefined;
+  return chainCfg.usdcAddress ? chainCfg.usdcName : chainCfg.usdfcName;
+}

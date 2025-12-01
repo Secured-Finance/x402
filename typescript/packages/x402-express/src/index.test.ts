@@ -1,16 +1,16 @@
 import { NextFunction, Request, Response } from "express";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { findMatchingRoute } from "x402/shared";
-import { getPaywallHtml } from "x402/paywall";
-import { exact } from "x402/schemes";
+import { findMatchingRoute } from "@secured-finance/sf-x402/shared";
+import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
+import { exact } from "@secured-finance/sf-x402/schemes";
 import {
   PaymentMiddlewareConfig,
   PaymentPayload,
   RoutesConfig,
   FacilitatorConfig,
   RouteConfig,
-} from "x402/types";
-import { useFacilitator } from "x402/verify";
+} from "@secured-finance/sf-x402/types";
+import { useFacilitator } from "@secured-finance/sf-x402/verify";
 import { paymentMiddleware } from "./index";
 import { Address as SolanaAddress } from "@solana/kit";
 

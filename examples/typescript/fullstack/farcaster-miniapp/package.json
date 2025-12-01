@@ -25,7 +25,7 @@
     "viem": "^2.27.2",
     "wagmi": "^2.14.11",
     "x402-fetch": "^0.4.1",
-    "x402-next": "workspace:*"
+    "@secured-finance/sf-x402-next": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^20.17.30",

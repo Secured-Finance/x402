@@ -1,4 +1,4 @@
-import { ListDiscoveryResourcesResponse } from "x402/types";
+import { ListDiscoveryResourcesResponse } from "@secured-finance/sf-x402/types";
 import { X402RequestParams } from "./utils/x402Client";
 
 export interface ElectronWindow extends Window {

@@ -1,6 +1,6 @@
 import { AxiosInstance } from "axios";
 import { Chain } from "viem";
-import { PaymentRequirements } from "x402/types";
+import { PaymentRequirements } from "@secured-finance/sf-x402/types";
 import { operationStore } from "../stores/operations";
 import { budgetStore } from "../stores/budget";
 import { checkUSDCBalanceForPaymentAtomic } from "./balanceChecker";

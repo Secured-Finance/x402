@@ -4,11 +4,14 @@ import { SvmAddressRegex } from "../shared/svm";
 import { Base64EncodedRegex } from "../../shared/base64";
 
 // Constants
-const EvmMaxAtomicUnits = 18;
+// Maximum number of decimal digits for uint256 values (2^256 - 1 ≈ 1.15e77)
+const MaxUint256Digits = 78;
 const EvmAddressRegex = /^0x[0-9a-fA-F]{40}$/;
 const MixedAddressRegex = /^0x[a-fA-F0-9]{40}|[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$/;
 const HexEncoded64ByteRegex = /^0x[0-9a-fA-F]{64}$/;
 const EvmSignatureRegex = /^0x[0-9a-fA-F]+$/; // Flexible hex signature validation
+// Transaction hash regex for both EVM (0x + 64 hex chars) and Solana (base58, typically 87-88 chars)
+const TransactionHashRegex = /^0x[0-9a-fA-F]{64}$|^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
 // Enums
 export const schemes = ["exact"] as const;
 export const x402Versions = [1] as const;
@@ -19,6 +22,7 @@ export const ErrorReasons = [
   "invalid_exact_evm_payload_authorization_value",
   "invalid_exact_evm_payload_signature",
   "invalid_exact_evm_payload_recipient_mismatch",
+  "nonce_already_used",
   "invalid_exact_svm_payload_transaction",
   "invalid_exact_svm_payload_transaction_amount_mismatch",
   "invalid_exact_svm_payload_transaction_create_ata_instruction",
@@ -85,7 +89,8 @@ export type PaymentRequirements = z.infer<typeof PaymentRequirementsSchema>;
 export const ExactEvmPayloadAuthorizationSchema = z.object({
   from: z.string().regex(EvmAddressRegex),
   to: z.string().regex(EvmAddressRegex),
-  value: z.string().refine(isInteger).refine(hasMaxLength(EvmMaxAtomicUnits)),
+  // value is an integer string representing atomic units. Allow up to uint256 max digits.
+  value: z.string().refine(isInteger).refine(hasMaxLength(MaxUint256Digits)),
   validAfter: z.string().refine(isInteger),
   validBefore: z.string().refine(isInteger),
   nonce: z.string().regex(HexEncoded64ByteRegex),
@@ -202,7 +207,7 @@ export const SettleResponseSchema = z.object({
   success: z.boolean(),
   errorReason: z.enum(ErrorReasons).optional(),
   payer: EvmOrSvmAddress.optional(),
-  transaction: z.string().regex(MixedAddressRegex),
+  transaction: z.string().regex(TransactionHashRegex),
   network: NetworkSchema,
 });
 export type SettleResponse = z.infer<typeof SettleResponseSchema>;
