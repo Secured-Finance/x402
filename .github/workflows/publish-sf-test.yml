@@ -27,6 +27,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,16 +35,19 @@ jobs:
         with:
           node-version: "18"
           registry-url: "https://npm.pkg.github.com"
+
       - name: Install dependencies
         run: pnpm install
         working-directory: ./typescript
+
+      # ---------- BUILD ----------
       - name: Build x402
-        if: inputs.package == 'x402' || inputs.package == 'both' || inputs.package == 'x402-express'
+        if: inputs.package == 'x402' || inputs.package == 'all'
         run: pnpm --filter "@secured-finance/sf-x402" build
         working-directory: ./typescript
 
       - name: Build x402-express
-        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        if: inputs.package == 'x402-express' || inputs.package == 'all'
         run: pnpm --filter "@secured-finance/sf-x402-express" build
         working-directory: ./typescript
 
@@ -52,39 +56,40 @@ jobs:
         run: pnpm --filter "@secured-finance/sf-x402-next" build
         working-directory: ./typescript
 
+      # ---------- VERSION BUMP ----------
       - name: Bump x402 version
-        if: inputs.package == 'x402' || inputs.package == 'both'
+        if: inputs.package == 'x402' || inputs.package == 'all'
         run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
         working-directory: ./typescript/packages/x402
 
       - name: Bump x402-express version
-        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        if: inputs.package == 'x402-express' || inputs.package == 'all'
         run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
         working-directory: ./typescript/packages/x402-express
 
-      - name: Bump x402-react version
-        if: inputs.package == 'x402-react' || inputs.package == 'all'
+      - name: Bump x402-next version
+        if: inputs.package == 'x402-next' || inputs.package == 'all'
         run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
-        working-directory: ./typescript/packages/x402-react
-      
+        working-directory: ./typescript/packages/x402-next
+
+      # ---------- PUBLISH ----------
       - name: Publish x402
-        if: inputs.package == 'x402' || inputs.package == 'both'
+        if: inputs.package == 'x402' || inputs.package == 'all'
         run: pnpm --filter "@secured-finance/sf-x402" publish --registry=https://npm.pkg.github.com --no-git-checks
         working-directory: ./typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish x402-express
-        if: inputs.package == 'x402-express' || inputs.package == 'both'
+        if: inputs.package == 'x402-express' || inputs.package == 'all'
         run: pnpm --filter "@secured-finance/sf-x402-express" publish --registry=https://npm.pkg.github.com --no-git-checks
         working-directory: ./typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-     
-      - name: Publish x402-react
-        if: inputs.package == 'x402-react' || inputs.package == 'all'
-        run: pnpm --filter "@secured-finance/sf-x402-react" publish --registry=https://npm.pkg.github.com --no-git-checks
+
+      - name: Publish x402-next
+        if: inputs.package == 'x402-next' || inputs.package == 'all'
+        run: pnpm --filter "@secured-finance/sf-x402-next" publish --registry=https://npm.pkg.github.com --no-git-checks
         working-directory: ./typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
