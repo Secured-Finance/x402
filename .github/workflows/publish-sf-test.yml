@@ -4,15 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: 'Which package to publish'
+        description: "Which package to publish"
         required: true
         type: choice
         options:
           - x402
           - x402-express
-          - both
+          - x402-next
+          - all
       version_bump:
-        description: 'Version bump type'
+        description: "Version bump type"
         required: true
         type: choice
         options:
@@ -31,8 +32,8 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          registry-url: 'https://npm.pkg.github.com'
+          node-version: "18"
+          registry-url: "https://npm.pkg.github.com"
       - name: Install dependencies
         run: pnpm install
         working-directory: ./typescript
@@ -46,6 +47,11 @@ jobs:
         run: pnpm --filter "@secured-finance/sf-x402-express" build
         working-directory: ./typescript
 
+      - name: Build x402-next
+        if: inputs.package == 'x402-next' || inputs.package == 'all'
+        run: pnpm --filter "@secured-finance/sf-x402-next" build
+        working-directory: ./typescript
+
       - name: Bump x402 version
         if: inputs.package == 'x402' || inputs.package == 'both'
         run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
@@ -56,6 +62,11 @@ jobs:
         run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
         working-directory: ./typescript/packages/x402-express
 
+      - name: Bump x402-react version
+        if: inputs.package == 'x402-react' || inputs.package == 'all'
+        run: pnpm version ${{ inputs.version_bump }} --no-git-tag-version
+        working-directory: ./typescript/packages/x402-react
+      
       - name: Publish x402
         if: inputs.package == 'x402' || inputs.package == 'both'
         run: pnpm --filter "@secured-finance/sf-x402" publish --registry=https://npm.pkg.github.com --no-git-checks
@@ -69,3 +80,11 @@ jobs:
         working-directory: ./typescript
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+     
+      - name: Publish x402-react
+        if: inputs.package == 'x402-react' || inputs.package == 'all'
+        run: pnpm --filter "@secured-finance/sf-x402-react" publish --registry=https://npm.pkg.github.com --no-git-checks
+        working-directory: ./typescript
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

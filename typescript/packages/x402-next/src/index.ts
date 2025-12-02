@@ -8,9 +8,11 @@ import {
   findMatchingPaymentRequirements,
   findMatchingRoute,
   getAllAssetsForNetwork,
-  processPriceToAtomicAmount,
   toJsonSafe,
+  getNetworkId,
+  getUsdcChainConfigForChain,
 } from "@secured-finance/sf-x402/shared";
+import { calculateFee } from "@secured-finance/sf-x402";
 import { getPaywallHtml } from "@secured-finance/sf-x402/paywall";
 import type { Network } from "@secured-finance/sf-x402/types";
 import { isTestnetNetwork } from "@secured-finance/sf-x402/types";
@@ -137,6 +139,10 @@ export function paymentMiddleware(
 
     // evm networks
     if (SupportedEVMNetworks.includes(network)) {
+      // Get chain config to check for FeeReceiver support
+      const chainId = getNetworkId(network);
+      const chainConfig = getUsdcChainConfigForChain(chainId);
+
       // Get all available tokens for this network, filtered by token if specified
       const allAssets = getAllAssetsForNetwork(network, token);
 
@@ -150,7 +156,7 @@ export function paymentMiddleware(
           if (!parsedAmount.success) {
             return new NextResponse(
               `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
-              { status: 500 }
+              { status: 500 },
             );
           }
           const parsedUsdAmount = parsedAmount.data;
@@ -160,14 +166,23 @@ export function paymentMiddleware(
           maxAmountRequired = price.amount;
         }
 
+        // Calculate facilitator fee using shared constants
+        const totalAmount = BigInt(maxAmountRequired);
+        const { feeAmount, merchantAmount } = calculateFee(totalAmount, asset.decimals);
+
+        // Determine who receives the payment
+        const actualPayTo = chainConfig?.feeReceiverAddress
+          ? getAddress(chainConfig.feeReceiverAddress)
+          : getAddress(payTo as Address);
+
         paymentRequirements.push({
           scheme: "exact",
           network,
-          maxAmountRequired,
+          maxAmountRequired: totalAmount.toString(),
           resource: resourceUrl,
           description: description ?? "",
           mimeType: mimeType ?? "application/json",
-          payTo: getAddress(payTo),
+          payTo: actualPayTo,
           maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
           asset: getAddress(asset.address),
           outputSchema: {
@@ -179,7 +194,15 @@ export function paymentMiddleware(
             },
             output: outputSchema,
           },
-          extra: (asset as ERC20TokenAmount["asset"]).eip712,
+          extra: {
+            ...(asset as ERC20TokenAmount["asset"]).eip712,
+            // Store merchant info and fee for settlement
+            merchant: getAddress(payTo as Address),
+            merchantAmount: merchantAmount.toString(),
+            feeAmount: feeAmount.toString(),
+            useFeeReceiver: !!chainConfig?.feeReceiverAddress,
+            decimals: asset.decimals, // Include decimals for paywall to use
+          },
         });
       }
     }
@@ -215,7 +238,7 @@ export function paymentMiddleware(
           if (!parsedAmount.success) {
             return new NextResponse(
               `Invalid price (price: ${price}). Must be in the form "$3.10", 0.10, "0.001"`,
-              { status: 500 }
+              { status: 500 },
             );
           }
           const parsedUsdAmount = parsedAmount.data;
@@ -236,20 +259,20 @@ export function paymentMiddleware(
           payTo: payTo,
           maxTimeoutSeconds: maxTimeoutSeconds ?? 60,
           asset: asset.address,
-        // TODO: Rename outputSchema to requestStructure
-        outputSchema: {
-          input: {
-            type: "http",
-            method,
-            discoverable: discoverable ?? true,
-            ...inputSchema,
+          // TODO: Rename outputSchema to requestStructure
+          outputSchema: {
+            input: {
+              type: "http",
+              method,
+              discoverable: discoverable ?? true,
+              ...inputSchema,
+            },
+            output: outputSchema,
           },
-          output: outputSchema,
-        },
-        extra: {
-          feePayer,
-        },
-      });
+          extra: {
+            feePayer,
+          },
+        });
       }
     } else {
       throw new Error(`Unsupported network: ${network}`);
