@@ -11,6 +11,7 @@ interface PaywallOptions {
   appName?: string;
   appLogo?: string;
   sessionTokenEndpoint?: string;
+  rpcUrls?: Record<string, string>;
 }
 
 /**
@@ -41,6 +42,7 @@ function escapeString(str: string): string {
  * @param options.appName - The name of the application to display in the wallet connection modal
  * @param options.appLogo - The logo of the application to display in the wallet connection modal
  * @param options.sessionTokenEndpoint - The API endpoint for generating session tokens for Onramp authentication
+ * @param options.rpcUrls - custom rpc urls
  * @returns An HTML string containing the paywall page
  */
 export function getPaywallHtml({
@@ -52,6 +54,7 @@ export function getPaywallHtml({
   appName,
   appLogo,
   sessionTokenEndpoint,
+  rpcUrls,
 }: PaywallOptions): string {
   const logOnTestnet = testnet
     ? "console.log('Payment requirements initialized:', window.x402);"
@@ -67,6 +70,7 @@ export function getPaywallHtml({
       currentUrl: "${escapeString(currentUrl)}",
       config: {
         chainConfig: ${JSON.stringify(config)},
+        rpcUrls: ${JSON.stringify(rpcUrls || {})}
       },
       cdpClientKey: "${escapeString(cdpClientKey || "")}",
       appName: "${escapeString(appName || "")}",

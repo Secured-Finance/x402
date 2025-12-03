@@ -94,7 +94,8 @@ export async function getUSDCBalance<
 }
 
 /**
- * Gets the primary stablecoin (USDC or USDFC) balance for a specific address based on chain config
+ * Gets the primary stablecoin (USDC, JPYC, or USDFC) balance for a specific address based on chain config
+ * Priority: USDC > JPYC > USDFC (checks first available token)
  */
 export async function getStablecoinBalance<
   transport extends Transport,
@@ -104,7 +105,7 @@ export async function getStablecoinBalance<
   const chainId = client.chain!.id;
   const chainConfig = getUsdcChainConfigForChain(chainId);
   if (!chainConfig) return 0n;
-  const tokenAddress = (chainConfig.usdcAddress || chainConfig.usdfcAddress) as `0x${string}` | undefined;
+  const tokenAddress = (chainConfig.usdcAddress || chainConfig.jpycAddress || chainConfig.usdfcAddress) as `0x${string}` | undefined;
   if (!tokenAddress) return 0n;
   const balance = await client.readContract({
     address: tokenAddress,

@@ -17,8 +17,13 @@ declare global {
           {
             usdcAddress: string;
             usdcName: string;
+            jpycAddress?: string;
+            jpycName?: string;
+            usdfcAddress?: string;
+            usdfcName?: string;
           }
         >;
+        rpcUrls?: Record<string, string>;
       };
     };
   }

@@ -13,7 +13,6 @@ import { useAccount, useSwitchChain, useWalletClient } from "wagmi";
 
 import type { PaymentRequirements } from "../../types/verify";
 import { exact } from "../../schemes";
-import { getStablecoinBalance } from "../../shared/evm";
 import type { Network } from "../../types/shared";
 
 import { Spinner } from "./Spinner";
@@ -102,21 +101,30 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     return "USDC";
   }, [chainConfig, tokenAddress]);
 
-  const publicClient = useMemo(
-    () =>
-      createPublicClient({
-        chain: paymentChain,
-        transport: http(),
-      }).extend(publicActions),
-    [paymentChain],
-  );
+  const publicClient = useMemo(() => {
+    // Get custom RPC URL from config if available
+    const customRpcUrl = x402.config.rpcUrls?.[network];
+
+    // Debug logging to see what RPC is being used
+    console.log("🔍 EvmPaywall RPC Debug:", {
+      network,
+      "x402.config.rpcUrls": x402.config.rpcUrls,
+      customRpcUrl,
+      usingDefault: !customRpcUrl,
+    });
+
+    return createPublicClient({
+      chain: paymentChain,
+      transport: customRpcUrl ? http(customRpcUrl) : http(), // ✅ Use custom RPC
+    }).extend(publicActions);
+  }, [paymentChain, network, x402.config.rpcUrls]);
 
   const checkStableBalance = useCallback(async () => {
     if (!address) {
       return;
     }
     // Read balance of the specific token from payment requirements
-    const balance = await publicClient.readContract({
+    const balance = (await publicClient.readContract({
       address: tokenAddress,
       abi: [
         {
@@ -129,7 +137,7 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       ],
       functionName: "balanceOf",
       args: [address],
-    }) as bigint;
+    })) as bigint;
 
     const formattedBalance = formatUnits(balance, decimals);
     // Format to 2-4 decimal places for cleaner display
@@ -201,32 +209,128 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
     }
     const walletClient = wagmiWalletClient.extend(publicActions);
 
+    // Generate request ID for tracing
+    const requestId = crypto.randomUUID();
+    const paymentStartTime = Date.now();
+    console.log(`[PAYMENT] [${requestId}] [START]`, {
+      timestamp: paymentStartTime,
+      address,
+      network,
+      chainId,
+      token: stableSymbol,
+      amount: paymentRequirement.maxAmountRequired,
+      currentUrl: x402.currentUrl,
+    });
+
     setIsPaying(true);
 
     try {
       setStatus(`Checking ${stableSymbol} balance...`);
-      const balance = await getStablecoinBalance(publicClient, address);
+      // Check the balance of the specific token from payment requirements
+      const balance = (await publicClient.readContract({
+        address: tokenAddress,
+        abi: [
+          {
+            inputs: [{ name: "account", type: "address" }],
+            name: "balanceOf",
+            outputs: [{ type: "uint256" }],
+            stateMutability: "view",
+            type: "function",
+          },
+        ],
+        functionName: "balanceOf",
+        args: [address],
+      })) as bigint;
+
+      console.log(balance, "balance", stableSymbol, "symbol");
 
       if (balance === 0n) {
         throw new Error(`Insufficient balance. Make sure you have ${stableSymbol} on ${chainName}`);
       }
 
+      // Also check if balance is sufficient for the required amount
+      const requiredAmount = BigInt(paymentRequirement.maxAmountRequired);
+      if (balance < requiredAmount) {
+        const formattedRequired = Number(requiredAmount) / 10 ** decimals;
+        const formattedBalance = Number(balance) / 10 ** decimals;
+        throw new Error(
+          `Insufficient balance. Required: ${formattedRequired.toFixed(2)} ${stableSymbol}, Available: ${formattedBalance.toFixed(2)} ${stableSymbol}`,
+        );
+      }
+
+      console.log(`[PAYMENT] [${requestId}] [BALANCE_CHECK]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        balance: balance.toString(),
+        required: requiredAmount.toString(),
+        balanceFormatted: (Number(balance) / 10 ** decimals).toFixed(2),
+        requiredFormatted: (Number(requiredAmount) / 10 ** decimals).toFixed(2),
+        status: "SUFFICIENT",
+      });
+
       setStatus("Creating payment signature...");
       const validPaymentRequirements = ensureValidAmount(paymentRequirement);
+
+      console.log(`[PAYMENT] [${requestId}] [CREATE_SIGNATURE]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        payTo: validPaymentRequirements.payTo,
+        maxAmountRequired: validPaymentRequirements.maxAmountRequired,
+        asset: validPaymentRequirements.asset,
+      });
+
       const initialPayment = await exact.evm.createPayment(
         walletClient,
         1,
         validPaymentRequirements,
       );
 
+      console.log(`[PAYMENT] [${requestId}] [SIGNATURE_CREATED]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        nonce:
+          "authorization" in initialPayment.payload
+            ? initialPayment.payload.authorization.nonce
+            : "N/A",
+        validAfter:
+          "authorization" in initialPayment.payload
+            ? initialPayment.payload.authorization.validAfter
+            : "N/A",
+        validBefore:
+          "authorization" in initialPayment.payload
+            ? initialPayment.payload.authorization.validBefore
+            : "N/A",
+        signature:
+          "signature" in initialPayment.payload
+            ? initialPayment.payload.signature?.slice(0, 20) + "..."
+            : "N/A",
+        currentTimestamp: Math.floor(Date.now() / 1000),
+      });
+
       const paymentHeader: string = exact.evm.encodePayment(initialPayment);
+
+      console.log(`[PAYMENT] [${requestId}] [FETCH_START]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        url: x402.currentUrl,
+        paymentHeaderLength: paymentHeader.length,
+      });
 
       setStatus("Requesting content with payment...");
       const response = await fetch(x402.currentUrl, {
         headers: {
           "X-PAYMENT": paymentHeader,
+          "X-REQUEST-ID": requestId,
           "Access-Control-Expose-Headers": "X-PAYMENT-RESPONSE",
         },
+      });
+
+      console.log(`[PAYMENT] [${requestId}] [RESPONSE_RECEIVED]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        status: response.status,
+        ok: response.ok,
+        statusText: response.statusText,
       });
 
       if (response.ok) {
@@ -234,6 +338,15 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       } else if (response.status === 402) {
         const errorData = await response.json().catch(() => ({}));
         if (errorData && typeof errorData.x402Version === "number") {
+          console.log(`[PAYMENT] [${requestId}] [RETRY_ATTEMPT]`, {
+            timestamp: Date.now(),
+            elapsed: Date.now() - paymentStartTime,
+            reason: "VERSION_MISMATCH",
+            serverVersion: errorData.x402Version,
+            clientVersion: 1,
+          });
+
+          setStatus("Retrying with updated protocol version...");
           const retryPayment = await exact.evm.createPayment(
             walletClient,
             errorData.x402Version,
@@ -252,16 +365,52 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
             await onSuccessfulResponse(retryResponse);
             return;
           } else {
-            throw new Error(`Payment retry failed: ${retryResponse.statusText}`);
+            const retryError = await retryResponse
+              .json()
+              .catch(() => ({ error: retryResponse.statusText }));
+            console.error("Payment retry failed:", {
+              status: retryResponse.status,
+              error: retryError,
+              address,
+              network,
+            });
+            throw new Error(
+              `Payment retry failed: ${retryError.error || retryResponse.statusText}`,
+            );
           }
         } else {
-          throw new Error(`Payment failed: ${response.statusText}`);
+          console.error("Payment validation failed:", {
+            status: response.status,
+            error: errorData,
+            address,
+            network,
+          });
+          throw new Error(`Payment failed: ${errorData.error || response.statusText}`);
         }
       } else {
         throw new Error(`Request failed: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Payment failed");
+      const errorMessage = error instanceof Error ? error.message : "Payment failed";
+      console.error(`[PAYMENT] [${requestId}] [ERROR]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - paymentStartTime,
+        error: errorMessage,
+        address,
+        network,
+        chainId,
+      });
+
+      // Provide more helpful error messages
+      if (errorMessage.includes("Insufficient balance")) {
+        setStatus(`${errorMessage}. Please check your wallet balance and try again.`);
+      } else if (errorMessage.includes("User rejected")) {
+        setStatus("Payment cancelled. Please try again when ready.");
+      } else if (errorMessage.includes("network")) {
+        setStatus(`Network error: ${errorMessage}. Please check your connection and try again.`);
+      } else {
+        setStatus(`Payment failed: ${errorMessage}. Please try again.`);
+      }
     } finally {
       setIsPaying(false);
     }

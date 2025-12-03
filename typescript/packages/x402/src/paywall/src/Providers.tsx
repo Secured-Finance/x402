@@ -1,5 +1,6 @@
 import { OnchainKitProvider } from "@coinbase/onchainkit";
 import type { ReactNode } from "react";
+import { useMemo } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { WagmiProvider, createConfig, http } from "wagmi";
 import { base, baseSepolia, mainnet, sepolia, filecoin, filecoinCalibration } from "viem/chains";
@@ -7,19 +8,6 @@ import { base, baseSepolia, mainnet, sepolia, filecoin, filecoinCalibration } fr
 import { choosePaymentRequirement, isEvmNetwork } from "./paywallUtils";
 
 const queryClient = new QueryClient();
-
-// Create wagmi config with all supported chains
-const wagmiConfig = createConfig({
-  chains: [mainnet, sepolia, base, baseSepolia, filecoin, filecoinCalibration],
-  transports: {
-    [mainnet.id]: http(),
-    [sepolia.id]: http(),
-    [base.id]: http(),
-    [baseSepolia.id]: http(),
-    [filecoin.id]: http(),
-    [filecoinCalibration.id]: http(),
-  },
-});
 
 type ProvidersProps = {
   children: ReactNode;
@@ -33,8 +21,36 @@ type ProvidersProps = {
  * @returns The Providers component
  */
 export function Providers({ children }: ProvidersProps) {
-  const { testnet = true, cdpClientKey, appName, appLogo, paymentRequirements } = window.x402;
+  const {
+    testnet = true,
+    cdpClientKey,
+    appName,
+    appLogo,
+    paymentRequirements,
+    config,
+  } = window.x402;
   const selectedRequirement = choosePaymentRequirement(paymentRequirements, testnet);
+
+  // Create wagmi config with custom RPC URLs if available
+  const wagmiConfig = useMemo(() => {
+    const rpcUrls = config?.rpcUrls || {};
+
+    console.log("🔍 Providers wagmiConfig RPC URLs:", rpcUrls);
+
+    return createConfig({
+      chains: [mainnet, sepolia, base, baseSepolia, filecoin, filecoinCalibration],
+      transports: {
+        [mainnet.id]: rpcUrls["mainnet"] ? http(rpcUrls["mainnet"]) : http(),
+        [sepolia.id]: rpcUrls["sepolia"] ? http(rpcUrls["sepolia"]) : http(),
+        [base.id]: rpcUrls["base"] ? http(rpcUrls["base"]) : http(),
+        [baseSepolia.id]: rpcUrls["base-sepolia"] ? http(rpcUrls["base-sepolia"]) : http(),
+        [filecoin.id]: rpcUrls["filecoin"] ? http(rpcUrls["filecoin"]) : http(),
+        [filecoinCalibration.id]: rpcUrls["filecoin-calibration"]
+          ? http(rpcUrls["filecoin-calibration"])
+          : http(),
+      },
+    });
+  }, [config?.rpcUrls]);
 
   if (!isEvmNetwork(selectedRequirement.network)) {
     return <>{children}</>;

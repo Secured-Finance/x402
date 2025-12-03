@@ -109,8 +109,18 @@ export function paymentMiddleware(
   const routePatterns = computeRoutePatterns(routes);
 
   return async function middleware(request: NextRequest) {
+    const requestId = request.headers.get("X-REQUEST-ID") || crypto.randomUUID();
+    const middlewareStartTime = Date.now();
     const pathname = request.nextUrl.pathname;
     const method = request.method.toUpperCase();
+
+    console.log(`[MIDDLEWARE] [${requestId}] [REQUEST_RECEIVED]`, {
+      timestamp: middlewareStartTime,
+      pathname,
+      method,
+      hasPaymentHeader: !!request.headers.get("X-PAYMENT"),
+      userAgent: request.headers.get("User-Agent")?.slice(0, 50),
+    });
 
     // Find matching route configuration
     const matchingRoute = findMatchingRoute(routePatterns, pathname, method);
@@ -118,6 +128,13 @@ export function paymentMiddleware(
     if (!matchingRoute) {
       return NextResponse.next();
     }
+
+    console.log(`[MIDDLEWARE] [${requestId}] [ROUTE_MATCHED]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      pattern: matchingRoute.pattern.source,
+      verb: matchingRoute.verb,
+    });
 
     const { price, network, token, config = {} } = matchingRoute.config;
     const {
@@ -278,6 +295,14 @@ export function paymentMiddleware(
       throw new Error(`Unsupported network: ${network}`);
     }
 
+    console.log(`[MIDDLEWARE] [${requestId}] [REQUIREMENTS_BUILT]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      count: paymentRequirements.length,
+      networks: paymentRequirements.map(r => r.network),
+      assets: paymentRequirements.map(r => r.asset),
+    });
+
     // Check for payment header
     const paymentHeader = request.headers.get("X-PAYMENT");
     if (!paymentHeader) {
@@ -311,6 +336,7 @@ export function paymentMiddleware(
               appLogo: paywall?.appLogo,
               appName: paywall?.appName,
               sessionTokenEndpoint: paywall?.sessionTokenEndpoint,
+              rpcUrls: paywall?.rpcUrls,
             });
           return new NextResponse(html, {
             status: 402,
@@ -334,6 +360,26 @@ export function paymentMiddleware(
     try {
       decodedPayment = exact.evm.decodePayment(paymentHeader);
       decodedPayment.x402Version = x402Version;
+
+      console.log(`[MIDDLEWARE] [${requestId}] [PAYMENT_DECODED]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        scheme: decodedPayment.scheme,
+        network: decodedPayment.network,
+        x402Version: decodedPayment.x402Version,
+        from:
+          "authorization" in decodedPayment.payload
+            ? decodedPayment.payload.authorization.from
+            : "N/A",
+        to:
+          "authorization" in decodedPayment.payload
+            ? decodedPayment.payload.authorization.to
+            : "N/A",
+        nonce:
+          "authorization" in decodedPayment.payload
+            ? decodedPayment.payload.authorization.nonce
+            : "N/A",
+      });
     } catch (error) {
       return new NextResponse(
         JSON.stringify({
@@ -362,7 +408,32 @@ export function paymentMiddleware(
       );
     }
 
+    console.log(`[MIDDLEWARE] [${requestId}] [REQUIREMENT_MATCHED]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      network: selectedPaymentRequirements.network,
+      asset: selectedPaymentRequirements.asset,
+      maxAmountRequired: selectedPaymentRequirements.maxAmountRequired,
+      payTo: selectedPaymentRequirements.payTo,
+    });
+
+    const verifyStartTime = Date.now();
+    console.log(`[MIDDLEWARE] [${requestId}] [VERIFY_START]`, {
+      timestamp: verifyStartTime,
+      elapsed: verifyStartTime - middlewareStartTime,
+      facilitatorUrl: facilitator?.url || "default",
+    });
+
     const verification = await verify(decodedPayment, selectedPaymentRequirements);
+
+    console.log(`[MIDDLEWARE] [${requestId}] [VERIFY_RESULT]`, {
+      timestamp: Date.now(),
+      verifyDuration: Date.now() - verifyStartTime,
+      elapsed: Date.now() - middlewareStartTime,
+      isValid: verification.isValid,
+      invalidReason: verification.invalidReason,
+      payer: verification.payer,
+    });
 
     if (!verification.isValid) {
       return new NextResponse(
@@ -386,7 +457,22 @@ export function paymentMiddleware(
 
     // Settle payment after response
     try {
+      const settleStartTime = Date.now();
+      console.log(`[MIDDLEWARE] [${requestId}] [SETTLE_START]`, {
+        timestamp: settleStartTime,
+        elapsed: settleStartTime - middlewareStartTime,
+      });
+
       const settlement = await settle(decodedPayment, selectedPaymentRequirements);
+
+      console.log(`[MIDDLEWARE] [${requestId}] [SETTLE_RESULT]`, {
+        timestamp: Date.now(),
+        settleDuration: Date.now() - settleStartTime,
+        elapsed: Date.now() - middlewareStartTime,
+        success: settlement.success,
+        transaction: settlement.transaction,
+        network: settlement.network,
+      });
 
       if (settlement.success) {
         response.headers.set(
@@ -413,6 +499,11 @@ export function paymentMiddleware(
         { status: 402, headers: { "Content-Type": "application/json" } },
       );
     }
+
+    console.log(`[MIDDLEWARE] [${requestId}] [SUCCESS]`, {
+      timestamp: Date.now(),
+      totalDuration: Date.now() - middlewareStartTime,
+    });
 
     return response;
   };
