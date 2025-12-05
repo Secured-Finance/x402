@@ -104,15 +104,6 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
   const publicClient = useMemo(() => {
     // Get custom RPC URL from config if available
     const customRpcUrl = x402.config.rpcUrls?.[network];
-
-    // Debug logging to see what RPC is being used
-    console.log("🔍 EvmPaywall RPC Debug:", {
-      network,
-      "x402.config.rpcUrls": x402.config.rpcUrls,
-      customRpcUrl,
-      usingDefault: !customRpcUrl,
-    });
-
     return createPublicClient({
       chain: paymentChain,
       transport: customRpcUrl ? http(customRpcUrl) : http(), // ✅ Use custom RPC
@@ -211,16 +202,6 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
 
     // Generate request ID for tracing
     const requestId = crypto.randomUUID();
-    const paymentStartTime = Date.now();
-    console.log(`[PAYMENT] [${requestId}] [START]`, {
-      timestamp: paymentStartTime,
-      address,
-      network,
-      chainId,
-      token: stableSymbol,
-      amount: paymentRequirement.maxAmountRequired,
-      currentUrl: x402.currentUrl,
-    });
 
     setIsPaying(true);
 
@@ -241,9 +222,6 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         functionName: "balanceOf",
         args: [address],
       })) as bigint;
-
-      console.log(balance, "balance", stableSymbol, "symbol");
-
       if (balance === 0n) {
         throw new Error(`Insufficient balance. Make sure you have ${stableSymbol} on ${chainName}`);
       }
@@ -258,26 +236,8 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         );
       }
 
-      console.log(`[PAYMENT] [${requestId}] [BALANCE_CHECK]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        balance: balance.toString(),
-        required: requiredAmount.toString(),
-        balanceFormatted: (Number(balance) / 10 ** decimals).toFixed(2),
-        requiredFormatted: (Number(requiredAmount) / 10 ** decimals).toFixed(2),
-        status: "SUFFICIENT",
-      });
-
       setStatus("Creating payment signature...");
       const validPaymentRequirements = ensureValidAmount(paymentRequirement);
-
-      console.log(`[PAYMENT] [${requestId}] [CREATE_SIGNATURE]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        payTo: validPaymentRequirements.payTo,
-        maxAmountRequired: validPaymentRequirements.maxAmountRequired,
-        asset: validPaymentRequirements.asset,
-      });
 
       const initialPayment = await exact.evm.createPayment(
         walletClient,
@@ -285,36 +245,7 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         validPaymentRequirements,
       );
 
-      console.log(`[PAYMENT] [${requestId}] [SIGNATURE_CREATED]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        nonce:
-          "authorization" in initialPayment.payload
-            ? initialPayment.payload.authorization.nonce
-            : "N/A",
-        validAfter:
-          "authorization" in initialPayment.payload
-            ? initialPayment.payload.authorization.validAfter
-            : "N/A",
-        validBefore:
-          "authorization" in initialPayment.payload
-            ? initialPayment.payload.authorization.validBefore
-            : "N/A",
-        signature:
-          "signature" in initialPayment.payload
-            ? initialPayment.payload.signature?.slice(0, 20) + "..."
-            : "N/A",
-        currentTimestamp: Math.floor(Date.now() / 1000),
-      });
-
       const paymentHeader: string = exact.evm.encodePayment(initialPayment);
-
-      console.log(`[PAYMENT] [${requestId}] [FETCH_START]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        url: x402.currentUrl,
-        paymentHeaderLength: paymentHeader.length,
-      });
 
       setStatus("Requesting content with payment...");
       const response = await fetch(x402.currentUrl, {
@@ -325,27 +256,11 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
         },
       });
 
-      console.log(`[PAYMENT] [${requestId}] [RESPONSE_RECEIVED]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        status: response.status,
-        ok: response.ok,
-        statusText: response.statusText,
-      });
-
       if (response.ok) {
         await onSuccessfulResponse(response);
       } else if (response.status === 402) {
         const errorData = await response.json().catch(() => ({}));
         if (errorData && typeof errorData.x402Version === "number") {
-          console.log(`[PAYMENT] [${requestId}] [RETRY_ATTEMPT]`, {
-            timestamp: Date.now(),
-            elapsed: Date.now() - paymentStartTime,
-            reason: "VERSION_MISMATCH",
-            serverVersion: errorData.x402Version,
-            clientVersion: 1,
-          });
-
           setStatus("Retrying with updated protocol version...");
           const retryPayment = await exact.evm.createPayment(
             walletClient,
@@ -392,14 +307,6 @@ export function EvmPaywall({ paymentRequirement, onSuccessfulResponse }: EvmPayw
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Payment failed";
-      console.error(`[PAYMENT] [${requestId}] [ERROR]`, {
-        timestamp: Date.now(),
-        elapsed: Date.now() - paymentStartTime,
-        error: errorMessage,
-        address,
-        network,
-        chainId,
-      });
 
       // Provide more helpful error messages
       if (errorMessage.includes("Insufficient balance")) {

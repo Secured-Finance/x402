@@ -69,14 +69,6 @@ export async function verify<
     */
 
   const exactEvmPayload = payload.payload as ExactEvmPayload;
-  const verifyDetailStartTime = Date.now();
-
-  console.log(`[VERIFY] [DETAIL_START]`, {
-    timestamp: verifyDetailStartTime,
-    network: payload.network,
-    scheme: payload.scheme,
-    payer: exactEvmPayload.authorization.from,
-  });
   // ✅ Use custom RPC URL if provided via config
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let clientToUse: any = client;
@@ -113,18 +105,6 @@ export async function verify<
     name = paymentRequirements.extra.name;
 
     version = paymentRequirements.extra?.version ?? (await getVersion(clientToUse));
-
-    console.log(`[VERIFY] [CONFIG_LOADED]`, {
-      timestamp: Date.now(),
-      elapsed: Date.now() - verifyDetailStartTime,
-      chainId,
-      tokenName: name,
-      tokenVersion: version,
-      tokenAddress: erc20Address,
-      useFeeReceiver: paymentRequirements.extra?.useFeeReceiver,
-      rpcType: config?.evmConfig?.rpcUrls?.[payload.network] ? "custom" : "default",
-      rpcUrl: config?.evmConfig?.rpcUrls?.[payload.network] || "default",
-    });
   } catch (e) {
     console.error("ERROR in verification setup:", e);
     return {
@@ -159,30 +139,11 @@ export async function verify<
 
   let isValidSignature;
   try {
-    console.log(`[VERIFY] [SIGNATURE_CHECK]`, {
-      timestamp: Date.now(),
-      elapsed: Date.now() - verifyDetailStartTime,
-      primaryType,
-      domain: {
-        name,
-        version,
-        chainId,
-        verifyingContract: erc20Address,
-      },
-    });
-
     const { signature } = parseErc6492Signature(exactEvmPayload.signature as Hex);
     isValidSignature = await verifyTypedData({
       address: exactEvmPayload.authorization.from as Address,
       ...permitTypedData,
       signature: signature,
-    });
-
-    console.log(`[VERIFY] [SIGNATURE_VALID]`, {
-      timestamp: Date.now(),
-      elapsed: Date.now() - verifyDetailStartTime,
-      isValid: isValidSignature,
-      payer: exactEvmPayload.authorization.from,
     });
   } catch (e) {
     console.error("ERROR verifying typed data:", {
@@ -223,14 +184,6 @@ export async function verify<
     };
   }
 
-  // Verify nonce has not already been used (replay protection)
-  console.log(`[VERIFY] [NONCE_CHECK]`, {
-    timestamp: Date.now(),
-    elapsed: Date.now() - verifyDetailStartTime,
-    nonce: exactEvmPayload.authorization.nonce,
-    payer: exactEvmPayload.authorization.from,
-  });
-
   const authState = await client.readContract({
     address: erc20Address,
     abi,
@@ -241,13 +194,6 @@ export async function verify<
     ],
   });
 
-  console.log(`[VERIFY] [NONCE_STATUS]`, {
-    timestamp: Date.now(),
-    elapsed: Date.now() - verifyDetailStartTime,
-    authState,
-    status: authState ? "ALREADY_USED" : "AVAILABLE",
-  });
-
   if (authState === true) {
     return {
       isValid: false,
@@ -255,15 +201,6 @@ export async function verify<
       payer: exactEvmPayload.authorization.from,
     };
   }
-
-  // Verify that payment was made to the correct address
-  console.log(`[VERIFY] [RECIPIENT_CHECK]`, {
-    timestamp: Date.now(),
-    elapsed: Date.now() - verifyDetailStartTime,
-    payloadTo: getAddress(exactEvmPayload.authorization.to),
-    requiredTo: getAddress(paymentRequirements.payTo),
-  });
-
   if (getAddress(exactEvmPayload.authorization.to) !== getAddress(paymentRequirements.payTo)) {
     return {
       isValid: false,
@@ -336,13 +273,6 @@ export async function verify<
       payer: exactEvmPayload.authorization.from,
     };
   }
-
-  console.log(`[VERIFY] [SUCCESS]`, {
-    timestamp: Date.now(),
-    totalDuration: Date.now() - verifyDetailStartTime,
-    isValid: true,
-    payer: exactEvmPayload.authorization.from,
-  });
 
   return {
     isValid: true,

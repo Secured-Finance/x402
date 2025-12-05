@@ -35,8 +35,6 @@ export function Providers({ children }: ProvidersProps) {
   const wagmiConfig = useMemo(() => {
     const rpcUrls = config?.rpcUrls || {};
 
-    console.log("🔍 Providers wagmiConfig RPC URLs:", rpcUrls);
-
     return createConfig({
       chains: [mainnet, sepolia, base, baseSepolia, filecoin, filecoinCalibration],
       transports: {

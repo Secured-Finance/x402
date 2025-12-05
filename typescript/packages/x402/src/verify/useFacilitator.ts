@@ -40,20 +40,12 @@ export function useFacilitator(facilitator?: FacilitatorConfig) {
     paymentRequirements: PaymentRequirements,
   ): Promise<VerifyResponse> {
     const url = facilitator?.url || DEFAULT_FACILITATOR_URL;
-    const verifyCallStartTime = Date.now();
 
     let headers = { "Content-Type": "application/json" };
     if (facilitator?.createAuthHeaders) {
       const authHeaders = await facilitator.createAuthHeaders();
       headers = { ...headers, ...authHeaders.verify };
     }
-
-    console.log(`[FACILITATOR_CLIENT] [VERIFY_CALL]`, {
-      url: `${url}/verify`,
-      timestamp: verifyCallStartTime,
-      network: paymentRequirements.network,
-      scheme: paymentRequirements.scheme,
-    });
 
     const res = await fetch(`${url}/verify`, {
       method: "POST",
@@ -63,13 +55,6 @@ export function useFacilitator(facilitator?: FacilitatorConfig) {
         paymentPayload: toJsonSafe(payload),
         paymentRequirements: toJsonSafe(paymentRequirements),
       }),
-    });
-
-    console.log(`[FACILITATOR_CLIENT] [VERIFY_RESPONSE]`, {
-      status: res.status,
-      timestamp: Date.now(),
-      duration: Date.now() - verifyCallStartTime,
-      ok: res.ok,
     });
 
     if (res.status !== 200) {
@@ -92,20 +77,12 @@ export function useFacilitator(facilitator?: FacilitatorConfig) {
     paymentRequirements: PaymentRequirements,
   ): Promise<SettleResponse> {
     const url = facilitator?.url || DEFAULT_FACILITATOR_URL;
-    const settleCallStartTime = Date.now();
 
     let headers = { "Content-Type": "application/json" };
     if (facilitator?.createAuthHeaders) {
       const authHeaders = await facilitator.createAuthHeaders();
       headers = { ...headers, ...authHeaders.settle };
     }
-
-    console.log(`[FACILITATOR_CLIENT] [SETTLE_CALL]`, {
-      url: `${url}/settle`,
-      timestamp: settleCallStartTime,
-      network: paymentRequirements.network,
-      scheme: paymentRequirements.scheme,
-    });
 
     const res = await fetch(`${url}/settle`, {
       method: "POST",
@@ -115,13 +92,6 @@ export function useFacilitator(facilitator?: FacilitatorConfig) {
         paymentPayload: toJsonSafe(payload),
         paymentRequirements: toJsonSafe(paymentRequirements),
       }),
-    });
-
-    console.log(`[FACILITATOR_CLIENT] [SETTLE_RESPONSE]`, {
-      status: res.status,
-      timestamp: Date.now(),
-      duration: Date.now() - settleCallStartTime,
-      ok: res.ok,
     });
 
     if (res.status !== 200) {
