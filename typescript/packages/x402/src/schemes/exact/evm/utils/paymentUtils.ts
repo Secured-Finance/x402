@@ -19,18 +19,51 @@ export function encodePayment(payment: PaymentPayload): string {
   // evm
   if (SupportedEVMNetworks.includes(payment.network)) {
     const evmPayload = payment.payload as ExactEvmPayload;
+
+    console.log(`[ENCODE_PAYMENT] [BEFORE]`, {
+      payloadKeys: Object.keys(evmPayload),
+      hasSalt: !!evmPayload.salt,
+      salt: evmPayload.salt,
+      hasPayTo: !!evmPayload.payTo,
+      payTo: evmPayload.payTo,
+      hasHook: !!evmPayload.hook,
+      hook: evmPayload.hook,
+      hasFacilitatorFee: !!evmPayload.facilitatorFee,
+      facilitatorFee: evmPayload.facilitatorFee,
+      hasSettlementMode: evmPayload.settlementMode !== undefined,
+      settlementMode: evmPayload.settlementMode,
+    });
+
     safe = {
       ...payment,
       payload: {
-        ...evmPayload,
+        signature: evmPayload.signature,
         authorization: Object.fromEntries(
           Object.entries(evmPayload.authorization).map(([key, value]) => [
             key,
             typeof value === "bigint" ? (value as bigint).toString() : value,
           ]),
         ) as ExactEvmPayload["authorization"],
+        // Preserve settlement parameters if they exist
+        ...(evmPayload.settlementMode !== undefined && {
+          settlementMode: evmPayload.settlementMode,
+        }),
+        ...(evmPayload.salt && { salt: evmPayload.salt }),
+        ...(evmPayload.payTo && { payTo: evmPayload.payTo }),
+        ...(evmPayload.facilitatorFee && { facilitatorFee: evmPayload.facilitatorFee }),
+        ...(evmPayload.hook && { hook: evmPayload.hook }),
+        ...(evmPayload.hookData !== undefined && { hookData: evmPayload.hookData }),
       },
     };
+
+    console.log(`[ENCODE_PAYMENT] [AFTER]`, {
+      payloadKeys: Object.keys(safe.payload),
+      hasSalt: !!(safe.payload as any).salt,
+      salt: (safe.payload as any).salt,
+      hasPayTo: !!(safe.payload as any).payTo,
+      payTo: (safe.payload as any).payTo,
+    });
+
     return safeBase64Encode(JSON.stringify(safe));
   }
 

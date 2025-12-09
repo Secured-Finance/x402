@@ -9,7 +9,7 @@ const MaxUint256Digits = 78;
 const EvmAddressRegex = /^0x[0-9a-fA-F]{40}$/;
 const MixedAddressRegex = /^0x[a-fA-F0-9]{40}|[A-Za-z0-9][A-Za-z0-9-]{0,34}[A-Za-z0-9]$/;
 const HexEncoded64ByteRegex = /^0x[0-9a-fA-F]{64}$/;
-const EvmSignatureRegex = /^0x[0-9a-fA-F]+$/; // Flexible hex signature validation
+const EvmSignatureRegex = /^0x[0-9a-fA-F]*$/; // Flexible hex signature validation (allows empty 0x)
 // Transaction hash regex for both EVM (0x + 64 hex chars) and Solana (base58, typically 87-88 chars)
 const TransactionHashRegex = /^0x[0-9a-fA-F]{64}$|^[1-9A-HJ-NP-Za-km-z]{87,88}$/;
 // Enums
@@ -57,6 +57,9 @@ export const ErrorReasons = [
   "unsupported_scheme",
   "unexpected_settle_error",
   "unexpected_verify_error",
+  "invalid_commitment",
+  "already_settled",
+  "settlement_router_not_configured",
 ] as const;
 
 // Refiners
@@ -100,6 +103,13 @@ export type ExactEvmPayloadAuthorization = z.infer<typeof ExactEvmPayloadAuthori
 export const ExactEvmPayloadSchema = z.object({
   signature: z.string().regex(EvmSignatureRegex),
   authorization: ExactEvmPayloadAuthorizationSchema,
+  // SettlementRouter mode fields (optional for backward compatibility)
+  settlementMode: z.boolean().optional(),
+  salt: z.string().regex(HexEncoded64ByteRegex).optional(),
+  payTo: z.string().regex(EvmAddressRegex).optional(),
+  facilitatorFee: z.string().refine(isInteger).optional(),
+  hook: z.string().regex(EvmAddressRegex).optional(),
+  hookData: z.string().regex(EvmSignatureRegex).optional(), // Hex encoded bytes
 });
 export type ExactEvmPayload = z.infer<typeof ExactEvmPayloadSchema>;
 
@@ -118,7 +128,16 @@ export const PaymentPayloadSchema = z.object({
 });
 export type PaymentPayload = z.infer<typeof PaymentPayloadSchema>;
 export type UnsignedPaymentPayload = Omit<PaymentPayload, "payload"> & {
-  payload: Omit<ExactEvmPayload, "signature"> & { signature: undefined };
+  payload: Omit<ExactEvmPayload, "signature"> & {
+    signature: undefined;
+    // SettlementRouter fields are optional but included in type
+    settlementMode?: boolean;
+    salt?: string;
+    payTo?: string;
+    facilitatorFee?: string;
+    hook?: string;
+    hookData?: string;
+  };
 };
 
 // x402 Resource Server Response

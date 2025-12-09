@@ -35,13 +35,14 @@ export const config: Record<string, ChainConfig> = {
     usdcName: "USD Coin",
     blockExplorer: "https://basescan.org",
   },
-  // Sepolia (Testnet) - PRODUCTION READY with FeeReceiver
+  // Sepolia (Testnet) - ✅ PRODUCTION READY with SettlementRouter
   "11155111": {
     usdcAddress: "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",
     usdcName: "USDC",
     jpycAddress: "0xE7C3D8C9a439feDe00D2600032D5dB0Be71C3c29",
     jpycName: "JPY Coin",
-    feeReceiverAddress: "0x8F35dfEC24944b5f87A97D38402dfA9117110d77", // ✅ Deployed
+    settlementRouter: "0x876308C01deCdbae46E353C81d869f102Ec1DFB3", // ✅ Deployed & Verified
+    transferHook: "0x884B29Ee0BdDdFD262990f720D7387611a1be50c", // ✅ Deployed & Verified
     blockExplorer: "https://sepolia.etherscan.io",
   },
   // Ethereum Mainnet - FeeReceiver not yet deployed
@@ -120,12 +121,13 @@ export const config: Record<string, ChainConfig> = {
     usdfcName: "USDFC",
     blockExplorer: "https://filfox.info/en",
   },
-  // Filecoin Calibration (Testnet) - PRODUCTION READY with FeeReceiver
+  // Filecoin Calibration (Testnet) - Ready for SettlementRouter deployment
   "314159": {
     usdfcAddress: "0xb3042734b608a1B16e9e86B374A3f3e389B4cDf0",
     usdfcName: "USD for Filecoin Community",
-    feeReceiverAddress: "0x0f7A0E7942d1b7a60921Ec99E655402Bd014FDC2", // ✅ Deployed
     blockExplorer: "https://filecoin.blockscout.com",
+    settlementRouter: "0xf9EF447517d15c503cfE3328b841441b878672A3", // ✅ Deployed & Verified
+    transferHook: "0xcab270aD54C7ACc89F2545e4E29e1FDa2Ee0651f",
   },
 };
 
@@ -136,7 +138,8 @@ export type ChainConfig = {
   jpycName?: string;
   usdfcAddress?: Address;
   usdfcName?: string;
-  feeReceiverAddress?: Address;
+  settlementRouter?: Address; // Audited SettlementRouter contract
+  transferHook?: Address; // Built-in TransferHook contract
   blockExplorer?: string;
 };
 

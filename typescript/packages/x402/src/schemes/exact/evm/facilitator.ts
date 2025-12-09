@@ -7,6 +7,8 @@ import {
   parseErc6492Signature,
   Transport,
   verifyTypedData,
+  concat,
+  toHex,
 } from "viem";
 import { getNetworkId } from "../../../shared";
 import { getVersion, getERC20Balance } from "../../../shared/evm";
@@ -15,7 +17,6 @@ import {
   authorizationTypes,
   ConnectedClient,
   SignerWallet,
-  feeReceiverABI,
   createConnectedClient,
 } from "../../../types/shared/evm";
 import {
@@ -27,6 +28,8 @@ import {
 } from "../../../types/verify";
 import { SCHEME } from "..";
 import { X402Config } from "../../../types";
+import { SETTLEMENT_ROUTER_ABI } from "../../../types/shared/evm/settlementRouterABI";
+import { verifyCommitment } from "./commitment";
 
 /**
  * Verifies a payment payload against the required payment details
@@ -69,6 +72,20 @@ export async function verify<
     */
 
   const exactEvmPayload = payload.payload as ExactEvmPayload;
+  
+  console.log(`[VERIFY] [START]`, {
+    timestamp: Date.now(),
+    network: payload.network,
+    scheme: payload.scheme,
+    payer: exactEvmPayload.authorization.from,
+    payloadKeys: Object.keys(exactEvmPayload),
+    hasSalt: !!exactEvmPayload.salt,
+    salt: exactEvmPayload.salt,
+    hasPayTo: !!exactEvmPayload.payTo,
+    payTo: exactEvmPayload.payTo,
+    hasSettlementMode: !!exactEvmPayload.settlementMode,
+    settlementMode: exactEvmPayload.settlementMode,
+  });
   // ✅ Use custom RPC URL if provided via config
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let clientToUse: any = client;
@@ -114,13 +131,12 @@ export async function verify<
     };
   }
   // Verify permit signature is recoverable for the owner address
-  // Use ReceiveWithAuthorization for FeeReceiver contract, TransferWithAuthorization otherwise
-  const useFeeReceiver = paymentRequirements.extra?.useFeeReceiver === true;
-  const primaryType = useFeeReceiver ? "ReceiveWithAuthorization" : "TransferWithAuthorization";
+  // Always use TransferWithAuthorization (SettlementRouter mode)
+  const primaryType = "TransferWithAuthorization";
 
   const permitTypedData = {
     types: authorizationTypes,
-    primaryType: primaryType as "TransferWithAuthorization" | "ReceiveWithAuthorization",
+    primaryType: primaryType as "TransferWithAuthorization",
     domain: {
       name,
       version,
@@ -201,7 +217,21 @@ export async function verify<
       payer: exactEvmPayload.authorization.from,
     };
   }
-  if (getAddress(exactEvmPayload.authorization.to) !== getAddress(paymentRequirements.payTo)) {
+
+  // For SettlementRouter mode, verify 'to' is the SettlementRouter address
+  // For legacy mode, verify 'to' is the merchant (payTo) address
+  const expectedRecipient = paymentRequirements.extra?.settlementRouter
+    ? (paymentRequirements.extra.settlementRouter as Address)
+    : paymentRequirements.payTo;
+
+  if (getAddress(exactEvmPayload.authorization.to) !== getAddress(expectedRecipient)) {
+    console.error("[VERIFY] Recipient mismatch:", {
+      payloadTo: exactEvmPayload.authorization.to,
+      expectedRecipient,
+      hasSettlementRouter: !!paymentRequirements.extra?.settlementRouter,
+      settlementRouter: paymentRequirements.extra?.settlementRouter,
+      payTo: paymentRequirements.payTo,
+    });
     return {
       isValid: false,
       invalidReason: "invalid_exact_evm_payload_recipient_mismatch",
@@ -300,6 +330,24 @@ export async function settle<transport extends Transport, chain extends Chain>(
   config?: X402Config,
 ): Promise<SettleResponse> {
   const payload = paymentPayload.payload as ExactEvmPayload;
+  const settleStartTime = Date.now();
+
+  console.log(`[SETTLE] [START]`, {
+    timestamp: settleStartTime,
+    network: paymentPayload.network,
+    payer: payload.authorization.from,
+    settlementRouter: paymentRequirements.extra?.settlementRouter,
+    transferHook: paymentRequirements.extra?.transferHook,
+    payloadSettlementMode: payload.settlementMode,
+    hasSettlementMode: !!payload.settlementMode,
+    payloadKeys: Object.keys(payload),
+    payloadSalt: payload.salt,
+    payloadPayTo: payload.payTo,
+    payloadHook: payload.hook,
+    payloadFacilitatorFee: payload.facilitatorFee,
+    payloadHookData: payload.hookData,
+    fullPayload: JSON.stringify(payload, null, 2),
+  });
 
   // re-verify to ensure the payment is still valid
   const valid = await verify(wallet, paymentPayload, paymentRequirements, config);
@@ -317,65 +365,241 @@ export async function settle<transport extends Transport, chain extends Chain>(
   // Returns the original signature (no-op) if the signature is not a 6492 signature
   const { signature } = parseErc6492Signature(payload.signature as Hex);
 
-  // Check if we're using the FeeReceiver contract
-  const useFeeReceiver = paymentRequirements.extra?.useFeeReceiver === true;
+  // ===== SettlementRouter Mode (ONLY mode - FeeReceiver removed) =====
 
-  let tx: `0x${string}`;
+  // Validate SettlementRouter configuration
+  // If paymentRequirements has settlementRouter, we're in SettlementRouter mode
+  // settlementMode in payload is optional and may not be present after encoding/decoding
+  const hasSettlementRouter = !!paymentRequirements.extra?.settlementRouter;
+  const hasTransferHook = !!paymentRequirements.extra?.transferHook;
+  
+  console.log(`[SETTLE] [VALIDATION]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    hasSettlementRouter,
+    hasTransferHook,
+    payloadSettlementMode: payload.settlementMode,
+    settlementRouter: paymentRequirements.extra?.settlementRouter,
+    transferHook: paymentRequirements.extra?.transferHook,
+  });
 
-  if (useFeeReceiver) {
-    // Extract merchant info and fee from payment requirements
-    const merchant = paymentRequirements.extra?.merchant as Address;
-    const totalAmount = BigInt(payload.authorization.value);
-
-    if (!merchant) {
-      throw new Error("Merchant address not found in payment requirements");
-    }
-
-    // Split signature into v, r, s components
-    const sig = signature.slice(2); // Remove 0x prefix
-    const r = `0x${sig.slice(0, 64)}` as Hex;
-    const s = `0x${sig.slice(64, 128)}` as Hex;
-    const v = parseInt(sig.slice(128, 130), 16);
-
-    // Call FeeReceiver contract's settleWithAuthorization
-    tx = await wallet.writeContract({
-      address: paymentRequirements.payTo as Address, // This is the FeeReceiver contract address
-      abi: feeReceiverABI,
-      functionName: "settleWithAuthorization",
-      args: [
-        paymentRequirements.asset as Address, // token
-        payload.authorization.from as Address, // payer
-        merchant, // merchant
-        totalAmount, // totalAmount
-        BigInt(payload.authorization.validAfter), // validAfter
-        BigInt(payload.authorization.validBefore), // validBefore
-        payload.authorization.nonce as Hex, // nonce
-        v, // v
-        r, // r
-        s, // s
-      ],
-      chain: wallet.chain as Chain,
+  if (!hasSettlementRouter || !hasTransferHook) {
+    console.error(`[SETTLE] [VALIDATION_FAILED]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - settleStartTime,
+      reason: "Missing settlementRouter or transferHook in paymentRequirements",
+      hasSettlementRouter,
+      hasTransferHook,
     });
-  } else {
-    // Original flow: direct transferWithAuthorization
-    tx = await wallet.writeContract({
-      address: paymentRequirements.asset as Address,
-      abi,
-      functionName: "transferWithAuthorization" as const,
-      args: [
-        payload.authorization.from as Address,
-        payload.authorization.to as Address,
-        BigInt(payload.authorization.value),
-        BigInt(payload.authorization.validAfter),
-        BigInt(payload.authorization.validBefore),
-        payload.authorization.nonce as Hex,
-        signature,
-      ],
-      chain: wallet.chain as Chain,
-    });
+    
+    return {
+      success: false,
+      network: paymentPayload.network,
+      transaction: "",
+      errorReason: "settlement_router_not_configured",
+      payer: payload.authorization.from,
+    };
   }
 
+  // At this point we know extra exists and has the required fields
+  const extra = paymentRequirements.extra!;
+  const settlementRouter = extra.settlementRouter as Address;
+  const transferHook = extra.transferHook as Address;
+  const merchant = extra.merchant as Address;
+  const facilitatorFee = BigInt(extra.feeAmount as string);
+  
+  // Get salt from payload, or fallback to paymentRequirements if available
+  // Salt is required for commitment verification
+  const salt = (payload.salt as Hex) || (extra.salt as Hex);
+  const hookData = (payload.hookData as Hex) || (payload.hookData as Hex) || "0x";
+  
+  // Get payTo from payload or fallback to merchant from paymentRequirements
+  const payTo = (payload.payTo as Address) || merchant;
+  
+  // Get hook from payload or fallback to transferHook from paymentRequirements
+  const hook = (payload.hook as Address) || transferHook;
+  
+  const chainId = getNetworkId(paymentPayload.network);
+
+  console.log(`[SETTLE] [COMMITMENT_PARAMS]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    salt: salt || "MISSING",
+    saltFromPayload: !!payload.salt,
+    saltFromExtra: !!extra.salt,
+    payTo: payTo,
+    payToFromPayload: !!payload.payTo,
+    hook: hook,
+    hookFromPayload: !!payload.hook,
+    hookData: hookData,
+    facilitatorFee: facilitatorFee.toString(),
+    merchant: merchant,
+    nonce: payload.authorization.nonce,
+  });
+
+  // Salt is required - if missing, we can't verify commitment
+  if (!salt) {
+    console.error(`[SETTLE] [MISSING_SALT]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - settleStartTime,
+      payloadKeys: Object.keys(payload),
+      extraKeys: Object.keys(extra),
+    });
+    
+    return {
+      success: false,
+      network: paymentPayload.network,
+      transaction: "",
+      errorReason: "invalid_payload", // Salt is required for SettlementRouter commitment verification
+      payer: payload.authorization.from,
+    };
+  }
+
+  // 1. Verify commitment matches nonce
+  const isValidCommitment = verifyCommitment(payload.authorization.nonce as Hex, {
+    chainId,
+    router: settlementRouter,
+    token: paymentRequirements.asset as Address,
+    from: payload.authorization.from as Address,
+    value: BigInt(payload.authorization.value),
+    validAfter: BigInt(payload.authorization.validAfter),
+    validBefore: BigInt(payload.authorization.validBefore),
+    salt,
+    payTo,
+    facilitatorFee,
+    hook,
+    hookData,
+  });
+
+  console.log(`[SETTLE] [COMMITMENT_VERIFICATION]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    isValidCommitment,
+    nonce: payload.authorization.nonce,
+  });
+
+  if (!isValidCommitment) {
+    return {
+      success: false,
+      network: paymentPayload.network,
+      transaction: "",
+      errorReason: "invalid_commitment",
+      payer: payload.authorization.from,
+    };
+  }
+
+  // 2. Check idempotency (prevent duplicate settlement)
+  const contextKey = await wallet.readContract({
+    address: settlementRouter,
+    abi: SETTLEMENT_ROUTER_ABI,
+    functionName: "calculateContextKey",
+    args: [
+      payload.authorization.from as Address,
+      paymentRequirements.asset as Address,
+      payload.authorization.nonce as Hex,
+    ],
+  });
+
+  const isSettled = await wallet.readContract({
+    address: settlementRouter,
+    abi: SETTLEMENT_ROUTER_ABI,
+    functionName: "isSettled",
+    args: [contextKey],
+  });
+
+  if (isSettled) {
+    return {
+      success: false,
+      network: paymentPayload.network,
+      transaction: "",
+      errorReason: "already_settled",
+      payer: payload.authorization.from,
+    };
+  }
+
+  // 3. Format signature: concat(r, s, v) as bytes
+  const sig = signature.slice(2); // Remove 0x prefix
+  const r = `0x${sig.slice(0, 64)}` as Hex;
+  const s = `0x${sig.slice(64, 128)}` as Hex;
+  const v = parseInt(sig.slice(128, 130), 16);
+  const formattedSignature = concat([r, s, toHex(v)]);
+
+  // 4. Call settleAndExecute on SettlementRouter
+  console.log(`[SETTLE] [TRANSACTION_PREPARE]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    settlementRouter,
+    transferHook,
+    merchant,
+    facilitatorFee: facilitatorFee.toString(),
+    value: payload.authorization.value,
+  });
+
+  let tx: Hex;
+  try {
+    tx = await wallet.writeContract({
+      address: settlementRouter,
+      abi: SETTLEMENT_ROUTER_ABI,
+      functionName: "settleAndExecute",
+      args: [
+        paymentRequirements.asset as Address, // token
+        payload.authorization.from as Address, // from
+        BigInt(payload.authorization.value), // value
+        BigInt(payload.authorization.validAfter), // validAfter
+        BigInt(payload.authorization.validBefore), // validBefore
+        payload.authorization.nonce as Hex, // nonce (commitment)
+        formattedSignature, // signature (as bytes)
+        salt, // salt
+        merchant, // payTo
+        facilitatorFee, // facilitatorFee
+        transferHook, // hook
+        hookData, // hookData
+      ],
+      chain: wallet.chain as Chain,
+    });
+  } catch (txError) {
+    console.error(`[SETTLE] [TRANSACTION_ERROR]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - settleStartTime,
+      error: txError instanceof Error ? txError.message : String(txError),
+      errorName: txError instanceof Error ? txError.name : undefined,
+      errorStack: txError instanceof Error ? txError.stack : undefined,
+      // Log transaction parameters for debugging
+      settlementRouter,
+      token: paymentRequirements.asset,
+      from: payload.authorization.from,
+      value: payload.authorization.value,
+      nonce: payload.authorization.nonce,
+      salt,
+      merchant,
+      facilitatorFee: facilitatorFee.toString(),
+      transferHook,
+    });
+    
+    return {
+      success: false,
+      network: paymentPayload.network,
+      transaction: "",
+      errorReason: "invalid_transaction_state",
+      payer: payload.authorization.from,
+    };
+  }
+
+  console.log(`[SETTLE] [TRANSACTION_SUBMITTED]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    transactionHash: tx,
+  });
+
   const receipt = await wallet.waitForTransactionReceipt({ hash: tx });
+
+  console.log(`[SETTLE] [TRANSACTION_RECEIPT]`, {
+    timestamp: Date.now(),
+    elapsed: Date.now() - settleStartTime,
+    transactionHash: tx,
+    status: receipt.status,
+    blockNumber: receipt.blockNumber.toString(),
+  });
 
   if (receipt.status !== "success") {
     return {
@@ -386,6 +610,14 @@ export async function settle<transport extends Transport, chain extends Chain>(
       payer: payload.authorization.from,
     };
   }
+
+  console.log(`[SETTLE] [SUCCESS]`, {
+    timestamp: Date.now(),
+    totalDuration: Date.now() - settleStartTime,
+    transactionHash: tx,
+    network: paymentPayload.network,
+    payer: payload.authorization.from,
+  });
 
   return {
     success: true,

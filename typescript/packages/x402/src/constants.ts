@@ -174,3 +174,28 @@ export const NETWORK_CONSTANTS = {
    */
   GAS_LIMIT_BUFFER_PERCENT: 20,
 } as const;
+
+/**
+ * SettlementRouter Protocol Constants
+ *
+ * These constants are specific to the audited SettlementRouter architecture.
+ */
+export const SETTLEMENT_ROUTER_CONSTANTS = {
+  /**
+   * Settlement protocol version identifier
+   * Used in commitment calculation to prevent cross-version replay attacks
+   */
+  PROTOCOL_VERSION: 'X402/settle/v1',
+
+  /**
+   * Empty hook data for simple transfers via TransferHook
+   * TransferHook doesn't require any hookData, so use empty bytes
+   */
+  EMPTY_HOOK_DATA: '0x' as const,
+
+  /**
+   * Expected gas overhead for SettlementRouter vs direct transfer
+   * ~8k gas (~16%) additional cost for hook architecture
+   */
+  GAS_OVERHEAD_ESTIMATE: 8000,
+} as const;

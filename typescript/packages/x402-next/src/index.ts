@@ -170,19 +170,18 @@ export function paymentMiddleware(
         const totalAmount = BigInt(maxAmountRequired);
         const { feeAmount, merchantAmount } = calculateFee(totalAmount, asset.decimals);
 
-        // Determine who receives the payment
-        const actualPayTo = chainConfig?.feeReceiverAddress
-          ? getAddress(chainConfig.feeReceiverAddress)
-          : getAddress(payTo as Address);
-
-        paymentRequirements.push({
+        const paymentReq: PaymentRequirements = {
           scheme: "exact",
           network,
           maxAmountRequired: totalAmount.toString(),
           resource: resourceUrl,
           description: description ?? "",
           mimeType: mimeType ?? "application/json",
-          payTo: actualPayTo,
+          // When using SettlementRouter, payTo should be the router address (what the authorization is signed for)
+          // Otherwise, payTo is the merchant address (direct transfer)
+          payTo: chainConfig?.settlementRouter 
+            ? getAddress(chainConfig.settlementRouter)
+            : payTo,
           maxTimeoutSeconds: maxTimeoutSeconds ?? 300,
           asset: getAddress(asset.address),
           outputSchema: {
@@ -200,10 +199,32 @@ export function paymentMiddleware(
             merchant: getAddress(payTo as Address),
             merchantAmount: merchantAmount.toString(),
             feeAmount: feeAmount.toString(),
-            useFeeReceiver: !!chainConfig?.feeReceiverAddress,
             decimals: asset.decimals, // Include decimals for paywall to use
+            // Only include SettlementRouter fields if they exist in chainConfig
+            ...(chainConfig?.settlementRouter && {
+              settlementRouter: getAddress(chainConfig.settlementRouter),
+            }),
+            ...(chainConfig?.transferHook && {
+              transferHook: getAddress(chainConfig.transferHook),
+            }),
+            hookData: "0x", // Empty for TransferHook (simple transfers)
           },
+        };
+
+        console.log(`[MIDDLEWARE] [PAYMENT_REQUIREMENT_CREATED]`, {
+          network,
+          token: asset.symbol,
+          asset: paymentReq.asset,
+          maxAmountRequired: paymentReq.maxAmountRequired,
+          merchantAmount: paymentReq.extra?.merchantAmount,
+          feeAmount: paymentReq.extra?.feeAmount,
+          hasSettlementRouter: !!paymentReq.extra?.settlementRouter,
+          hasTransferHook: !!paymentReq.extra?.transferHook,
+          settlementRouter: paymentReq.extra?.settlementRouter,
+          transferHook: paymentReq.extra?.transferHook,
         });
+
+        paymentRequirements.push(paymentReq);
       }
     }
     // svm networks
@@ -280,6 +301,19 @@ export function paymentMiddleware(
 
     // Check for payment header
     const paymentHeader = request.headers.get("X-PAYMENT");
+    const requestId = crypto.randomUUID();
+    const middlewareStartTime = Date.now();
+
+    console.log(`[MIDDLEWARE] [${requestId}] [START]`, {
+      timestamp: middlewareStartTime,
+      pathname,
+      method,
+      network,
+      token,
+      paymentRequirementsCount: paymentRequirements.length,
+      hasPaymentHeader: !!paymentHeader,
+    });
+
     if (!paymentHeader) {
       const accept = request.headers.get("Accept");
       if (accept?.includes("text/html")) {
@@ -315,7 +349,13 @@ export function paymentMiddleware(
             });
           return new NextResponse(html, {
             status: 402,
-            headers: { "Content-Type": "text/html" },
+            headers: { 
+              "Content-Type": "text/html",
+              // Prevent browsers from caching the paywall HTML (which contains embedded SDK code)
+              "Cache-Control": "no-cache, no-store, must-revalidate",
+              "Pragma": "no-cache",
+              "Expires": "0",
+            },
           });
         }
       }
@@ -333,8 +373,32 @@ export function paymentMiddleware(
     // Verify payment
     let decodedPayment: PaymentPayload;
     try {
+      console.log(`[MIDDLEWARE] [${requestId}] [DECODE_PAYMENT]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        paymentHeaderLength: paymentHeader.length,
+      });
+
       decodedPayment = exact.evm.decodePayment(paymentHeader);
       decodedPayment.x402Version = x402Version;
+
+      console.log(`[MIDDLEWARE] [${requestId}] [PAYMENT_DECODED]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        network: decodedPayment.network,
+        scheme: decodedPayment.scheme,
+        payer:
+          "authorization" in decodedPayment.payload
+            ? decodedPayment.payload.authorization.from
+            : "N/A",
+        payloadKeys: Object.keys(decodedPayment.payload),
+        hasSalt: !!(decodedPayment.payload as any).salt,
+        salt: (decodedPayment.payload as any).salt,
+        hasPayTo: !!(decodedPayment.payload as any).payTo,
+        payTo: (decodedPayment.payload as any).payTo,
+        hasSettlementMode: !!(decodedPayment.payload as any).settlementMode,
+        settlementMode: (decodedPayment.payload as any).settlementMode,
+      });
     } catch (error) {
       return new NextResponse(
         JSON.stringify({
@@ -351,6 +415,17 @@ export function paymentMiddleware(
       paymentRequirements,
       decodedPayment,
     );
+
+    console.log(`[MIDDLEWARE] [${requestId}] [MATCHING_REQUIREMENTS]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      found: !!selectedPaymentRequirements,
+      asset: selectedPaymentRequirements?.asset,
+      maxAmountRequired: selectedPaymentRequirements?.maxAmountRequired,
+      settlementRouter: selectedPaymentRequirements?.extra?.settlementRouter,
+      transferHook: selectedPaymentRequirements?.extra?.transferHook,
+    });
+
     if (!selectedPaymentRequirements) {
       return new NextResponse(
         JSON.stringify({
@@ -363,7 +438,21 @@ export function paymentMiddleware(
       );
     }
 
+    console.log(`[MIDDLEWARE] [${requestId}] [VERIFY_START]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      facilitatorUrl: facilitator?.url || "default",
+    });
+
     const verification = await verify(decodedPayment, selectedPaymentRequirements);
+
+    console.log(`[MIDDLEWARE] [${requestId}] [VERIFY_RESULT]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      isValid: verification.isValid,
+      invalidReason: verification.invalidReason,
+      payer: verification.payer,
+    });
 
     if (!verification.isValid) {
       return new NextResponse(
@@ -377,43 +466,97 @@ export function paymentMiddleware(
       );
     }
 
-    // Proceed with request
-    const response = await NextResponse.next();
+    // Settle payment BEFORE proceeding with request
+    // This ensures payment is actually executed on-chain before content is served
+    console.log(`[MIDDLEWARE] [${requestId}] [SETTLE_START]`, {
+      timestamp: Date.now(),
+      elapsed: Date.now() - middlewareStartTime,
+      facilitatorUrl: facilitator?.url || "default",
+    });
 
-    // if the response from the protected route is >= 400, do not settle the payment
-    if (response.status >= 400) {
-      return response;
-    }
-
-    // Settle payment after response
+    let settlement;
     try {
-      const settlement = await settle(decodedPayment, selectedPaymentRequirements);
+      settlement = await settle(decodedPayment, selectedPaymentRequirements);
 
-      if (settlement.success) {
-        response.headers.set(
-          "X-PAYMENT-RESPONSE",
-          safeBase64Encode(
-            JSON.stringify({
-              success: true,
-              transaction: settlement.transaction,
-              network: settlement.network,
-              payer: settlement.payer,
-            }),
-          ),
-        );
-      }
+      console.log(`[MIDDLEWARE] [${requestId}] [SETTLE_RESULT]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        success: settlement.success,
+        transaction: settlement.transaction,
+        network: settlement.network,
+        payer: settlement.payer,
+        errorReason: settlement.errorReason,
+      });
     } catch (error) {
+      console.error(`[MIDDLEWARE] [${requestId}] [SETTLE_ERROR]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+
       return new NextResponse(
         JSON.stringify({
           x402Version,
           error:
             errorMessages?.settlementFailed ||
-            (error instanceof Error ? error : "Settlement failed"),
+            (error instanceof Error ? error.message : "Settlement failed"),
           accepts: paymentRequirements,
         }),
         { status: 402, headers: { "Content-Type": "application/json" } },
       );
     }
+
+    // If settlement failed, return 402 error - DO NOT proceed with request
+    if (!settlement.success) {
+      console.error(`[MIDDLEWARE] [${requestId}] [SETTLE_FAILED]`, {
+        timestamp: Date.now(),
+        elapsed: Date.now() - middlewareStartTime,
+        errorReason: settlement.errorReason,
+        transaction: settlement.transaction,
+      });
+
+      return new NextResponse(
+        JSON.stringify({
+          x402Version,
+          error:
+            errorMessages?.settlementFailed ||
+            settlement.errorReason ||
+            "Payment settlement failed",
+          accepts: paymentRequirements,
+          payer: settlement.payer,
+        }),
+        { status: 402, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    // Settlement succeeded - now proceed with request
+    const response = await NextResponse.next();
+
+    // if the response from the protected route is >= 400, still include settlement info
+    if (response.status >= 400) {
+      return response;
+    }
+
+    // Add settlement response header
+    response.headers.set(
+      "X-PAYMENT-RESPONSE",
+      safeBase64Encode(
+        JSON.stringify({
+          success: true,
+          transaction: settlement.transaction,
+          network: settlement.network,
+          payer: settlement.payer,
+        }),
+      ),
+    );
+
+    console.log(`[MIDDLEWARE] [${requestId}] [COMPLETE]`, {
+      timestamp: Date.now(),
+      totalDuration: Date.now() - middlewareStartTime,
+      status: response.status,
+    });
+
     return response;
   };
 }

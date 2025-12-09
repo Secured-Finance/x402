@@ -154,10 +154,16 @@ export function paymentMiddleware(
         const totalAmount = BigInt(maxAmountRequired);
         const { feeAmount, merchantAmount } = calculateFee(totalAmount, asset.decimals);
 
-        // Determine who receives the payment
-        const actualPayTo = chainConfig?.feeReceiverAddress
-          ? getAddress(chainConfig.feeReceiverAddress)
-          : getAddress(payTo);
+        // Validate SettlementRouter is configured
+        if (!chainConfig?.settlementRouter || !chainConfig?.transferHook) {
+          throw new Error(
+            `SettlementRouter not configured for network ${network}. ` +
+              `Please deploy SettlementRouter and TransferHook contracts first.`,
+          );
+        }
+
+        // Payment authorization goes to SettlementRouter
+        const actualPayTo = getAddress(chainConfig.settlementRouter);
 
         paymentRequirements.push({
           scheme: "exact",
@@ -180,12 +186,16 @@ export function paymentMiddleware(
           },
           extra: {
             ...(asset as ERC20TokenAmount["asset"]).eip712,
-            // Store merchant info and fee for settlement
+            // Merchant and fee information
             merchant: getAddress(payTo),
             merchantAmount: merchantAmount.toString(),
             feeAmount: feeAmount.toString(),
-            useFeeReceiver: !!chainConfig?.feeReceiverAddress,
-            decimals: asset.decimals, // Include decimals for paywall to use
+            decimals: asset.decimals,
+
+            // SettlementRouter parameters
+            settlementRouter: getAddress(chainConfig.settlementRouter),
+            transferHook: getAddress(chainConfig.transferHook),
+            hookData: "0x", // Empty for TransferHook (simple transfers)
           },
         });
       }
